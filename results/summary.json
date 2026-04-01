@@ -1,0 +1,65 @@
+{
+  "eurosat-rqvae-8x8x1": {
+    "model": "eurosat-rqvae-8x8x1",
+    "psnr": 29.93,
+    "ssim": 0.7861,
+    "lpips": 0.1665,
+    "fid": 19.10
+  },
+  "eurosat-rqvae-8x8x4": {
+    "model": "eurosat-rqvae-8x8x4",
+    "psnr": 33.28,
+    "ssim": 0.8705,
+    "lpips": 0.0946,
+    "fid": 14.43
+  },
+  "eurosat-rqvae-8x8x8": {
+    "model": "eurosat-rqvae-8x8x8",
+    "psnr": 36.27,
+    "ssim": 0.9362,
+    "lpips": 0.0513,
+    "fid": 9.40
+  },
+  "eurosat-rqvae-4x4x1": {
+    "model": "eurosat-rqvae-4x4x1",
+    "psnr": 28.41,
+    "ssim": 0.7128,
+    "lpips": 0.2294,
+    "fid": 25.46
+  },
+  "eurosat-rqvae-4x4x4": {
+    "model": "eurosat-rqvae-4x4x4",
+    "psnr": 27.93,
+    "ssim": 0.7107,
+    "lpips": 0.2573,
+    "fid": 34.90
+  },
+  "eurosat-rqvae-4x4x8": {
+    "model": "eurosat-rqvae-4x4x8",
+    "psnr": 23.34,
+    "ssim": 0.5634,
+    "lpips": 0.3802,
+    "fid": 102.80
+  },
+  "eurosat-rqvae-2x2x1": {
+    "model": "eurosat-rqvae-2x2x1",
+    "psnr": 24.68,
+    "ssim": 0.5864,
+    "lpips": 0.3477,
+    "fid": 67.20
+  },
+  "eurosat-rqvae-2x2x4": {
+    "model": "eurosat-rqvae-2x2x4",
+    "psnr": 24.68,
+    "ssim": 0.5799,
+    "lpips": 0.3474,
+    "fid": 70.20
+  },
+  "eurosat-rqvae-2x2x8": {
+    "model": "eurosat-rqvae-2x2x8",
+    "psnr": 25.72,
+    "ssim": 0.6497,
+    "lpips": 0.2985,
+    "fid": 42.35
+  }
+}

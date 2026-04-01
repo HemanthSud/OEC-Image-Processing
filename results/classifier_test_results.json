@@ -1,0 +1,15 @@
+{
+  "test_accuracy": 100.0,
+  "per_class_accuracy": {
+    "AnnualCrop": 100.0,
+    "Forest": 0,
+    "HerbaceousVegetation": 0,
+    "Highway": 0,
+    "Industrial": 0,
+    "Pasture": 0,
+    "PermanentCrop": 0,
+    "Residential": 0,
+    "River": 0,
+    "SeaLake": 0
+  }
+}

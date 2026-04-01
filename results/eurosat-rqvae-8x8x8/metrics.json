@@ -1,0 +1,7 @@
+{
+  "model": "eurosat-rqvae-8x8x8",
+  "psnr": 36.27,
+  "ssim": 0.9362,
+  "lpips": 0.0513,
+  "fid": 9.4
+}

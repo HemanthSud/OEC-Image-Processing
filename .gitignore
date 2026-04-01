@@ -1,0 +1,11 @@
+research/
+EuroSAT_RGB/
+*.tar.gz
+__pycache__/
+*.pyc
+.DS_Store
+rq-vae/output/
+nac/data/
+nac/models/
+nac/logs/
+.vscode/
