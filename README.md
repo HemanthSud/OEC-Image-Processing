@@ -245,7 +245,7 @@ cd ../nac
 python nac_eurosat.py
 ```
 
-## Status and Next Steps
+## Possible Next Steps
 
 The reconstruction study and metric evaluation are complete. The main remaining items are:
 
