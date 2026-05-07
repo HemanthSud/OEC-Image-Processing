@@ -2,7 +2,7 @@
 
 This repository contains an Orbital Edge Computing (OEC) research project on satellite image compression using Residual Quantized Variational Autoencoders (RQ-VAE) and N-gram Arithmetic Coding (NAC).
 
-The project studies how different compression levels affect EuroSAT image reconstruction quality and downstream classification performance in bandwidth-constrained satellite settings.
+The project studies how different compression levels affect EuroSAT image reconstruction quality and sets up downstream classification evaluation in bandwidth-constrained satellite settings.
 
 ## Project Motivation
 
@@ -15,11 +15,9 @@ This project explores that trade-off by training multiple RQ-VAE compression mod
 This work was carried out in NICE Lab at North Carolina State University.
 
 - Researcher: Hemanth Sudhaharan
-- Advisor: Xuanhao Luo
-- PI: Dr. Yuchen Liu
-- Timeline: February 2026 to April 1, 2026
-
-
+- Graduate mentor: Xuanhao Luo
+- Faculty advisor: Dr. Yuchen Liu
+- Timeline: February 2026 to 
 
 ## Project Goal
 
@@ -95,6 +93,8 @@ After feedback, additional models were trained to check the missing intermediate
 - `4x4x2` and `4x4x3` with a smaller `1024`-entry codebook
 
 These runs were added to check whether reconstruction quality improves smoothly with quantization depth and whether a smaller codebook helps the smaller latent grids.
+
+Metrics were computed for all follow-up runs and included in the full results table below.
 
 Follow-up metrics were saved in:
 
@@ -220,7 +220,6 @@ This suggests that the current hyperparameter setting may not yet be well matche
 |   |-- train_eurosat.py
 |   `-- rqvae/
 |-- eurosat_split_indices.pt
-|-- project_session_history.txt
 |-- rq_nac_eurosat_colab.ipynb
 `-- split_indices.py
 ```
