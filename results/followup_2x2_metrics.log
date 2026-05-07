@@ -1,0 +1,30 @@
+
+============================================================
+Evaluating: eurosat-rqvae-2x2x2
+============================================================
+Working with z of shape (1, 256, 2, 2) = 1024 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 2x2x2
+  PSNR:  23.43 dB
+  SSIM:  0.5570
+  LPIPS: 0.3778
+  FID:   95.16
+
+============================================================
+Evaluating: eurosat-rqvae-2x2x3
+============================================================
+Working with z of shape (1, 256, 2, 2) = 1024 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 2x2x3
+  PSNR:  23.92 dB
+  SSIM:  0.5671
+  LPIPS: 0.3627
+  FID:   76.07
+
+======================================================================
+Model                PSNR(dB)   SSIM       LPIPS      FID       
+----------------------------------------------------------------------
+eurosat-rqvae-2x2x2  23.43      0.5570     0.3778     95.16     
+eurosat-rqvae-2x2x3  23.92      0.5671     0.3627     76.07     

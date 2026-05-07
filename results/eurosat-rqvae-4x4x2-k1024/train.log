@@ -1,0 +1,344 @@
+06:04:43 - INFO - Device: cuda
+06:04:43 - INFO - Config: configs/eurosat/stage1/eurosat-rqvae-4x4x2.yaml
+06:04:43 - INFO - Output: output/eurosat-rqvae-4x4x2-k1024
+06:04:43 - INFO - Overrides -> code_shape=[4, 4, 2], n_embed=1024, latent_loss_weight=0.25, perceptual_weight=1.0, disc_weight=0.75, disc_start=0, lr=4e-05
+06:04:43 - INFO - Train: 21600 images, Val: 2700 images
+06:04:43 - INFO - Batch size: 16, Steps/epoch: 1350
+06:04:44 - INFO - RQ-VAE parameters: 98.70M
+06:07:55 - INFO - Epoch 1/150 [train] loss_total: 0.4176, loss_recon: 0.1061, loss_latent: 0.0140, lr: 8.00e-06
+06:08:00 - INFO - Epoch 1/150 [val]   loss_total: 4.5411, loss_recon: 4.5041
+06:08:01 - INFO -   -> New best model saved (val_recon=4.5041)
+06:11:12 - INFO - Epoch 2/150 [train] loss_total: -0.4137, loss_recon: 0.0820, loss_latent: 0.0108, lr: 1.60e-05
+06:11:17 - INFO - Epoch 2/150 [val]   loss_total: 3.6794, loss_recon: 3.6397
+06:11:19 - INFO -   -> New best model saved (val_recon=3.6397)
+06:14:29 - INFO - Epoch 3/150 [train] loss_total: -0.4188, loss_recon: 0.0812, loss_latent: 0.0092, lr: 2.40e-05
+06:14:34 - INFO - Epoch 3/150 [val]   loss_total: 3.6068, loss_recon: 3.5834
+06:14:36 - INFO -   -> New best model saved (val_recon=3.5834)
+06:17:46 - INFO - Epoch 4/150 [train] loss_total: -0.3207, loss_recon: 0.0761, loss_latent: 0.0066, lr: 3.20e-05
+06:17:51 - INFO - Epoch 4/150 [val]   loss_total: 3.5303, loss_recon: 3.5102
+06:17:53 - INFO -   -> New best model saved (val_recon=3.5102)
+06:21:03 - INFO - Epoch 5/150 [train] loss_total: 0.0551, loss_recon: 0.0749, loss_latent: 0.0052, lr: 4.00e-05
+06:21:08 - INFO - Epoch 5/150 [val]   loss_total: 3.4510, loss_recon: 3.4370
+06:21:10 - INFO -   -> New best model saved (val_recon=3.4370)
+06:24:20 - INFO - Epoch 6/150 [train] loss_total: 0.3445, loss_recon: 0.0708, loss_latent: 0.0038, lr: 4.00e-05
+06:24:25 - INFO - Epoch 6/150 [val]   loss_total: 2.9989, loss_recon: 2.9856
+06:24:27 - INFO -   -> New best model saved (val_recon=2.9856)
+06:27:37 - INFO - Epoch 7/150 [train] loss_total: 0.4168, loss_recon: 0.0598, loss_latent: 0.0047, lr: 4.00e-05
+06:27:42 - INFO - Epoch 7/150 [val]   loss_total: 1.9570, loss_recon: 1.9321
+06:27:44 - INFO -   -> New best model saved (val_recon=1.9321)
+06:30:54 - INFO - Epoch 8/150 [train] loss_total: 0.3973, loss_recon: 0.0477, loss_latent: 0.0063, lr: 4.00e-05
+06:30:59 - INFO - Epoch 8/150 [val]   loss_total: 1.8078, loss_recon: 1.7848
+06:31:01 - INFO -   -> New best model saved (val_recon=1.7848)
+06:34:11 - INFO - Epoch 9/150 [train] loss_total: 0.3990, loss_recon: 0.0436, loss_latent: 0.0060, lr: 3.99e-05
+06:34:17 - INFO - Epoch 9/150 [val]   loss_total: 2.1039, loss_recon: 2.0734
+06:37:27 - INFO - Epoch 10/150 [train] loss_total: 0.4068, loss_recon: 0.0392, loss_latent: 0.0069, lr: 3.99e-05
+06:37:32 - INFO - Epoch 10/150 [val]   loss_total: 1.6775, loss_recon: 1.6502
+06:37:33 - INFO -   -> New best model saved (val_recon=1.6502)
+06:40:44 - INFO - Epoch 11/150 [train] loss_total: 0.4016, loss_recon: 0.0356, loss_latent: 0.0074, lr: 3.98e-05
+06:40:50 - INFO - Epoch 11/150 [val]   loss_total: 1.7307, loss_recon: 1.6951
+06:44:00 - INFO - Epoch 12/150 [train] loss_total: 0.3855, loss_recon: 0.0326, loss_latent: 0.0084, lr: 3.98e-05
+06:44:05 - INFO - Epoch 12/150 [val]   loss_total: 1.9847, loss_recon: 1.9534
+06:47:15 - INFO - Epoch 13/150 [train] loss_total: 0.3804, loss_recon: 0.0312, loss_latent: 0.0087, lr: 3.97e-05
+06:47:21 - INFO - Epoch 13/150 [val]   loss_total: 1.4941, loss_recon: 1.4569
+06:47:22 - INFO -   -> New best model saved (val_recon=1.4569)
+06:50:32 - INFO - Epoch 14/150 [train] loss_total: 0.3763, loss_recon: 0.0305, loss_latent: 0.0097, lr: 3.96e-05
+06:50:38 - INFO - Epoch 14/150 [val]   loss_total: 1.2954, loss_recon: 1.2521
+06:50:39 - INFO -   -> New best model saved (val_recon=1.2521)
+06:53:50 - INFO - Epoch 15/150 [train] loss_total: 0.3757, loss_recon: 0.0296, loss_latent: 0.0102, lr: 3.95e-05
+06:53:55 - INFO - Epoch 15/150 [val]   loss_total: 1.4441, loss_recon: 1.4008
+06:57:05 - INFO - Epoch 16/150 [train] loss_total: 0.3738, loss_recon: 0.0289, loss_latent: 0.0110, lr: 3.94e-05
+06:57:11 - INFO - Epoch 16/150 [val]   loss_total: 1.7527, loss_recon: 1.7036
+07:00:21 - INFO - Epoch 17/150 [train] loss_total: 0.3668, loss_recon: 0.0283, loss_latent: 0.0122, lr: 3.93e-05
+07:00:26 - INFO - Epoch 17/150 [val]   loss_total: 1.4429, loss_recon: 1.3918
+07:03:37 - INFO - Epoch 18/150 [train] loss_total: 0.3653, loss_recon: 0.0279, loss_latent: 0.0129, lr: 3.92e-05
+07:03:42 - INFO - Epoch 18/150 [val]   loss_total: 1.5477, loss_recon: 1.4914
+07:06:52 - INFO - Epoch 19/150 [train] loss_total: 0.3621, loss_recon: 0.0272, loss_latent: 0.0130, lr: 3.91e-05
+07:06:57 - INFO - Epoch 19/150 [val]   loss_total: 1.5090, loss_recon: 1.4554
+07:10:08 - INFO - Epoch 20/150 [train] loss_total: 0.3593, loss_recon: 0.0269, loss_latent: 0.0134, lr: 3.90e-05
+07:10:13 - INFO - Epoch 20/150 [val]   loss_total: 1.2429, loss_recon: 1.1900
+07:10:15 - INFO -   -> New best model saved (val_recon=1.1900)
+07:13:25 - INFO - Epoch 21/150 [train] loss_total: 0.3581, loss_recon: 0.0268, loss_latent: 0.0138, lr: 3.88e-05
+07:13:30 - INFO - Epoch 21/150 [val]   loss_total: 1.1969, loss_recon: 1.1394
+07:13:31 - INFO -   -> New best model saved (val_recon=1.1394)
+07:16:42 - INFO - Epoch 22/150 [train] loss_total: 0.3558, loss_recon: 0.0266, loss_latent: 0.0140, lr: 3.87e-05
+07:16:47 - INFO - Epoch 22/150 [val]   loss_total: 1.2872, loss_recon: 1.2269
+07:19:57 - INFO - Epoch 23/150 [train] loss_total: 0.3558, loss_recon: 0.0265, loss_latent: 0.0140, lr: 3.85e-05
+07:20:02 - INFO - Epoch 23/150 [val]   loss_total: 1.6250, loss_recon: 1.5746
+07:23:13 - INFO - Epoch 24/150 [train] loss_total: 0.3549, loss_recon: 0.0265, loss_latent: 0.0140, lr: 3.83e-05
+07:23:18 - INFO - Epoch 24/150 [val]   loss_total: 1.3370, loss_recon: 1.2781
+07:26:28 - INFO - Epoch 25/150 [train] loss_total: 0.3546, loss_recon: 0.0262, loss_latent: 0.0141, lr: 3.82e-05
+07:26:33 - INFO - Epoch 25/150 [val]   loss_total: 1.1810, loss_recon: 1.1217
+07:26:35 - INFO -   -> New best model saved (val_recon=1.1217)
+07:26:36 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch25_model.pt
+07:29:47 - INFO - Epoch 26/150 [train] loss_total: 0.3516, loss_recon: 0.0264, loss_latent: 0.0142, lr: 3.80e-05
+07:29:52 - INFO - Epoch 26/150 [val]   loss_total: 1.2466, loss_recon: 1.1867
+07:33:02 - INFO - Epoch 27/150 [train] loss_total: 0.3515, loss_recon: 0.0265, loss_latent: 0.0143, lr: 3.78e-05
+07:33:07 - INFO - Epoch 27/150 [val]   loss_total: 1.2883, loss_recon: 1.2317
+07:36:18 - INFO - Epoch 28/150 [train] loss_total: 0.3507, loss_recon: 0.0260, loss_latent: 0.0147, lr: 3.76e-05
+07:36:23 - INFO - Epoch 28/150 [val]   loss_total: 1.2510, loss_recon: 1.1929
+07:39:34 - INFO - Epoch 29/150 [train] loss_total: 0.3484, loss_recon: 0.0261, loss_latent: 0.0147, lr: 3.74e-05
+07:39:39 - INFO - Epoch 29/150 [val]   loss_total: 1.2909, loss_recon: 1.2316
+07:42:49 - INFO - Epoch 30/150 [train] loss_total: 0.3473, loss_recon: 0.0261, loss_latent: 0.0148, lr: 3.71e-05
+07:42:54 - INFO - Epoch 30/150 [val]   loss_total: 1.2379, loss_recon: 1.1762
+07:46:05 - INFO - Epoch 31/150 [train] loss_total: 0.3455, loss_recon: 0.0259, loss_latent: 0.0150, lr: 3.69e-05
+07:46:10 - INFO - Epoch 31/150 [val]   loss_total: 1.2187, loss_recon: 1.1590
+07:49:20 - INFO - Epoch 32/150 [train] loss_total: 0.3458, loss_recon: 0.0260, loss_latent: 0.0151, lr: 3.67e-05
+07:49:25 - INFO - Epoch 32/150 [val]   loss_total: 1.1792, loss_recon: 1.1204
+07:49:27 - INFO -   -> New best model saved (val_recon=1.1204)
+07:52:37 - INFO - Epoch 33/150 [train] loss_total: 0.3445, loss_recon: 0.0259, loss_latent: 0.0153, lr: 3.64e-05
+07:52:42 - INFO - Epoch 33/150 [val]   loss_total: 1.4068, loss_recon: 1.3403
+07:55:52 - INFO - Epoch 34/150 [train] loss_total: 0.3430, loss_recon: 0.0259, loss_latent: 0.0154, lr: 3.62e-05
+07:55:57 - INFO - Epoch 34/150 [val]   loss_total: 1.2588, loss_recon: 1.1989
+07:59:08 - INFO - Epoch 35/150 [train] loss_total: 0.3426, loss_recon: 0.0259, loss_latent: 0.0154, lr: 3.59e-05
+07:59:13 - INFO - Epoch 35/150 [val]   loss_total: 1.2332, loss_recon: 1.1680
+08:02:23 - INFO - Epoch 36/150 [train] loss_total: 0.3414, loss_recon: 0.0255, loss_latent: 0.0157, lr: 3.57e-05
+08:02:29 - INFO - Epoch 36/150 [val]   loss_total: 1.2336, loss_recon: 1.1688
+08:05:39 - INFO - Epoch 37/150 [train] loss_total: 0.3391, loss_recon: 0.0256, loss_latent: 0.0158, lr: 3.54e-05
+08:05:44 - INFO - Epoch 37/150 [val]   loss_total: 1.3756, loss_recon: 1.3100
+08:08:55 - INFO - Epoch 38/150 [train] loss_total: 0.3386, loss_recon: 0.0253, loss_latent: 0.0162, lr: 3.51e-05
+08:09:00 - INFO - Epoch 38/150 [val]   loss_total: 1.1577, loss_recon: 1.0874
+08:09:02 - INFO -   -> New best model saved (val_recon=1.0874)
+08:12:12 - INFO - Epoch 39/150 [train] loss_total: 0.3380, loss_recon: 0.0253, loss_latent: 0.0162, lr: 3.48e-05
+08:12:17 - INFO - Epoch 39/150 [val]   loss_total: 1.3482, loss_recon: 1.2848
+08:15:28 - INFO - Epoch 40/150 [train] loss_total: 0.3367, loss_recon: 0.0254, loss_latent: 0.0163, lr: 3.45e-05
+08:15:33 - INFO - Epoch 40/150 [val]   loss_total: 1.2522, loss_recon: 1.1872
+08:18:44 - INFO - Epoch 41/150 [train] loss_total: 0.3360, loss_recon: 0.0253, loss_latent: 0.0164, lr: 3.42e-05
+08:18:49 - INFO - Epoch 41/150 [val]   loss_total: 1.2586, loss_recon: 1.1957
+08:21:59 - INFO - Epoch 42/150 [train] loss_total: 0.3349, loss_recon: 0.0252, loss_latent: 0.0164, lr: 3.39e-05
+08:22:04 - INFO - Epoch 42/150 [val]   loss_total: 1.2049, loss_recon: 1.1414
+08:25:15 - INFO - Epoch 43/150 [train] loss_total: 0.3335, loss_recon: 0.0251, loss_latent: 0.0166, lr: 3.36e-05
+08:25:20 - INFO - Epoch 43/150 [val]   loss_total: 1.2389, loss_recon: 1.1716
+08:28:30 - INFO - Epoch 44/150 [train] loss_total: 0.3316, loss_recon: 0.0249, loss_latent: 0.0168, lr: 3.33e-05
+08:28:35 - INFO - Epoch 44/150 [val]   loss_total: 1.1984, loss_recon: 1.1282
+08:31:46 - INFO - Epoch 45/150 [train] loss_total: 0.3325, loss_recon: 0.0250, loss_latent: 0.0169, lr: 3.29e-05
+08:31:51 - INFO - Epoch 45/150 [val]   loss_total: 1.2280, loss_recon: 1.1597
+08:35:01 - INFO - Epoch 46/150 [train] loss_total: 0.3306, loss_recon: 0.0248, loss_latent: 0.0173, lr: 3.26e-05
+08:35:06 - INFO - Epoch 46/150 [val]   loss_total: 1.2300, loss_recon: 1.1630
+08:38:17 - INFO - Epoch 47/150 [train] loss_total: 0.3296, loss_recon: 0.0247, loss_latent: 0.0172, lr: 3.23e-05
+08:38:22 - INFO - Epoch 47/150 [val]   loss_total: 1.2201, loss_recon: 1.1494
+08:41:32 - INFO - Epoch 48/150 [train] loss_total: 0.3291, loss_recon: 0.0246, loss_latent: 0.0176, lr: 3.19e-05
+08:41:38 - INFO - Epoch 48/150 [val]   loss_total: 1.2305, loss_recon: 1.1588
+08:44:48 - INFO - Epoch 49/150 [train] loss_total: 0.3285, loss_recon: 0.0245, loss_latent: 0.0177, lr: 3.16e-05
+08:44:53 - INFO - Epoch 49/150 [val]   loss_total: 1.3233, loss_recon: 1.2520
+08:48:03 - INFO - Epoch 50/150 [train] loss_total: 0.3272, loss_recon: 0.0244, loss_latent: 0.0176, lr: 3.12e-05
+08:48:09 - INFO - Epoch 50/150 [val]   loss_total: 1.2235, loss_recon: 1.1459
+08:48:10 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch50_model.pt
+08:51:20 - INFO - Epoch 51/150 [train] loss_total: 0.3257, loss_recon: 0.0243, loss_latent: 0.0177, lr: 3.09e-05
+08:51:26 - INFO - Epoch 51/150 [val]   loss_total: 1.1815, loss_recon: 1.1067
+08:54:36 - INFO - Epoch 52/150 [train] loss_total: 0.3256, loss_recon: 0.0242, loss_latent: 0.0180, lr: 3.05e-05
+08:54:41 - INFO - Epoch 52/150 [val]   loss_total: 1.2677, loss_recon: 1.1965
+08:57:52 - INFO - Epoch 53/150 [train] loss_total: 0.3248, loss_recon: 0.0243, loss_latent: 0.0181, lr: 3.01e-05
+08:57:57 - INFO - Epoch 53/150 [val]   loss_total: 1.1937, loss_recon: 1.1228
+09:01:07 - INFO - Epoch 54/150 [train] loss_total: 0.3238, loss_recon: 0.0241, loss_latent: 0.0182, lr: 2.97e-05
+09:01:12 - INFO - Epoch 54/150 [val]   loss_total: 1.2066, loss_recon: 1.1311
+09:04:23 - INFO - Epoch 55/150 [train] loss_total: 0.3232, loss_recon: 0.0242, loss_latent: 0.0182, lr: 2.94e-05
+09:04:28 - INFO - Epoch 55/150 [val]   loss_total: 1.2727, loss_recon: 1.1931
+09:07:39 - INFO - Epoch 56/150 [train] loss_total: 0.3223, loss_recon: 0.0240, loss_latent: 0.0186, lr: 2.90e-05
+09:07:44 - INFO - Epoch 56/150 [val]   loss_total: 1.3289, loss_recon: 1.2569
+09:10:54 - INFO - Epoch 57/150 [train] loss_total: 0.3209, loss_recon: 0.0238, loss_latent: 0.0186, lr: 2.86e-05
+09:10:59 - INFO - Epoch 57/150 [val]   loss_total: 1.1753, loss_recon: 1.1027
+09:14:09 - INFO - Epoch 58/150 [train] loss_total: 0.3207, loss_recon: 0.0238, loss_latent: 0.0187, lr: 2.82e-05
+09:14:14 - INFO - Epoch 58/150 [val]   loss_total: 1.2339, loss_recon: 1.1564
+09:17:25 - INFO - Epoch 59/150 [train] loss_total: 0.3196, loss_recon: 0.0238, loss_latent: 0.0188, lr: 2.78e-05
+09:17:30 - INFO - Epoch 59/150 [val]   loss_total: 1.2431, loss_recon: 1.1617
+09:20:41 - INFO - Epoch 60/150 [train] loss_total: 0.3184, loss_recon: 0.0237, loss_latent: 0.0190, lr: 2.74e-05
+09:20:46 - INFO - Epoch 60/150 [val]   loss_total: 1.2349, loss_recon: 1.1592
+09:23:56 - INFO - Epoch 61/150 [train] loss_total: 0.3182, loss_recon: 0.0237, loss_latent: 0.0193, lr: 2.70e-05
+09:24:01 - INFO - Epoch 61/150 [val]   loss_total: 1.1383, loss_recon: 1.0554
+09:24:03 - INFO -   -> New best model saved (val_recon=1.0554)
+09:27:13 - INFO - Epoch 62/150 [train] loss_total: 0.3173, loss_recon: 0.0236, loss_latent: 0.0194, lr: 2.66e-05
+09:27:18 - INFO - Epoch 62/150 [val]   loss_total: 1.1212, loss_recon: 1.0484
+09:27:20 - INFO -   -> New best model saved (val_recon=1.0484)
+09:30:30 - INFO - Epoch 63/150 [train] loss_total: 0.3164, loss_recon: 0.0237, loss_latent: 0.0195, lr: 2.62e-05
+09:30:36 - INFO - Epoch 63/150 [val]   loss_total: 1.1984, loss_recon: 1.1167
+09:33:46 - INFO - Epoch 64/150 [train] loss_total: 0.3155, loss_recon: 0.0235, loss_latent: 0.0198, lr: 2.58e-05
+09:33:51 - INFO - Epoch 64/150 [val]   loss_total: 1.1313, loss_recon: 1.0504
+09:37:01 - INFO - Epoch 65/150 [train] loss_total: 0.3145, loss_recon: 0.0233, loss_latent: 0.0198, lr: 2.54e-05
+09:37:06 - INFO - Epoch 65/150 [val]   loss_total: 1.1461, loss_recon: 1.0656
+09:40:17 - INFO - Epoch 66/150 [train] loss_total: 0.3138, loss_recon: 0.0234, loss_latent: 0.0200, lr: 2.49e-05
+09:40:22 - INFO - Epoch 66/150 [val]   loss_total: 1.2387, loss_recon: 1.1597
+09:43:32 - INFO - Epoch 67/150 [train] loss_total: 0.3135, loss_recon: 0.0233, loss_latent: 0.0203, lr: 2.45e-05
+09:43:37 - INFO - Epoch 67/150 [val]   loss_total: 1.1465, loss_recon: 1.0558
+09:46:48 - INFO - Epoch 68/150 [train] loss_total: 0.3125, loss_recon: 0.0233, loss_latent: 0.0202, lr: 2.41e-05
+09:46:53 - INFO - Epoch 68/150 [val]   loss_total: 1.1541, loss_recon: 1.0714
+09:50:03 - INFO - Epoch 69/150 [train] loss_total: 0.3119, loss_recon: 0.0232, loss_latent: 0.0206, lr: 2.37e-05
+09:50:08 - INFO - Epoch 69/150 [val]   loss_total: 1.2751, loss_recon: 1.1911
+09:53:19 - INFO - Epoch 70/150 [train] loss_total: 0.3115, loss_recon: 0.0232, loss_latent: 0.0207, lr: 2.32e-05
+09:53:24 - INFO - Epoch 70/150 [val]   loss_total: 1.1834, loss_recon: 1.1000
+09:56:35 - INFO - Epoch 71/150 [train] loss_total: 0.3101, loss_recon: 0.0231, loss_latent: 0.0209, lr: 2.28e-05
+09:56:40 - INFO - Epoch 71/150 [val]   loss_total: 1.1488, loss_recon: 1.0542
+09:59:50 - INFO - Epoch 72/150 [train] loss_total: 0.3102, loss_recon: 0.0231, loss_latent: 0.0210, lr: 2.24e-05
+09:59:55 - INFO - Epoch 72/150 [val]   loss_total: 1.1198, loss_recon: 1.0340
+09:59:57 - INFO -   -> New best model saved (val_recon=1.0340)
+10:03:07 - INFO - Epoch 73/150 [train] loss_total: 0.3086, loss_recon: 0.0230, loss_latent: 0.0211, lr: 2.19e-05
+10:03:12 - INFO - Epoch 73/150 [val]   loss_total: 1.1549, loss_recon: 1.0696
+10:06:23 - INFO - Epoch 74/150 [train] loss_total: 0.3083, loss_recon: 0.0231, loss_latent: 0.0212, lr: 2.15e-05
+10:06:28 - INFO - Epoch 74/150 [val]   loss_total: 1.1911, loss_recon: 1.1071
+10:09:38 - INFO - Epoch 75/150 [train] loss_total: 0.3075, loss_recon: 0.0229, loss_latent: 0.0215, lr: 2.11e-05
+10:09:43 - INFO - Epoch 75/150 [val]   loss_total: 1.1864, loss_recon: 1.0934
+10:09:44 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch75_model.pt
+10:12:55 - INFO - Epoch 76/150 [train] loss_total: 0.3067, loss_recon: 0.0228, loss_latent: 0.0218, lr: 2.06e-05
+10:13:00 - INFO - Epoch 76/150 [val]   loss_total: 1.1913, loss_recon: 1.1037
+10:16:10 - INFO - Epoch 77/150 [train] loss_total: 0.3057, loss_recon: 0.0227, loss_latent: 0.0220, lr: 2.02e-05
+10:16:16 - INFO - Epoch 77/150 [val]   loss_total: 1.1848, loss_recon: 1.0947
+10:19:26 - INFO - Epoch 78/150 [train] loss_total: 0.3052, loss_recon: 0.0228, loss_latent: 0.0222, lr: 1.98e-05
+10:19:31 - INFO - Epoch 78/150 [val]   loss_total: 1.1255, loss_recon: 1.0306
+10:19:32 - INFO -   -> New best model saved (val_recon=1.0306)
+10:22:43 - INFO - Epoch 79/150 [train] loss_total: 0.3048, loss_recon: 0.0228, loss_latent: 0.0223, lr: 1.94e-05
+10:22:48 - INFO - Epoch 79/150 [val]   loss_total: 1.2292, loss_recon: 1.1353
+10:25:58 - INFO - Epoch 80/150 [train] loss_total: 0.3040, loss_recon: 0.0227, loss_latent: 0.0226, lr: 1.89e-05
+10:26:03 - INFO - Epoch 80/150 [val]   loss_total: 1.2467, loss_recon: 1.1513
+10:29:14 - INFO - Epoch 81/150 [train] loss_total: 0.3033, loss_recon: 0.0228, loss_latent: 0.0229, lr: 1.85e-05
+10:29:19 - INFO - Epoch 81/150 [val]   loss_total: 1.2066, loss_recon: 1.1140
+10:32:30 - INFO - Epoch 82/150 [train] loss_total: 0.3028, loss_recon: 0.0226, loss_latent: 0.0230, lr: 1.81e-05
+10:32:35 - INFO - Epoch 82/150 [val]   loss_total: 1.2565, loss_recon: 1.1539
+10:35:45 - INFO - Epoch 83/150 [train] loss_total: 0.3020, loss_recon: 0.0226, loss_latent: 0.0234, lr: 1.76e-05
+10:35:50 - INFO - Epoch 83/150 [val]   loss_total: 1.1637, loss_recon: 1.0657
+10:39:01 - INFO - Epoch 84/150 [train] loss_total: 0.3011, loss_recon: 0.0223, loss_latent: 0.0237, lr: 1.72e-05
+10:39:06 - INFO - Epoch 84/150 [val]   loss_total: 1.1768, loss_recon: 1.0768
+10:42:16 - INFO - Epoch 85/150 [train] loss_total: 0.3010, loss_recon: 0.0226, loss_latent: 0.0241, lr: 1.68e-05
+10:42:21 - INFO - Epoch 85/150 [val]   loss_total: 1.1495, loss_recon: 1.0517
+10:45:32 - INFO - Epoch 86/150 [train] loss_total: 0.3006, loss_recon: 0.0225, loss_latent: 0.0248, lr: 1.63e-05
+10:45:37 - INFO - Epoch 86/150 [val]   loss_total: 1.2287, loss_recon: 1.1232
+10:48:47 - INFO - Epoch 87/150 [train] loss_total: 0.3002, loss_recon: 0.0225, loss_latent: 0.0263, lr: 1.59e-05
+10:48:52 - INFO - Epoch 87/150 [val]   loss_total: 1.2475, loss_recon: 1.1348
+10:52:03 - INFO - Epoch 88/150 [train] loss_total: 0.3003, loss_recon: 0.0224, loss_latent: 0.0295, lr: 1.55e-05
+10:52:08 - INFO - Epoch 88/150 [val]   loss_total: 1.1979, loss_recon: 1.0648
+10:55:18 - INFO - Epoch 89/150 [train] loss_total: 0.3003, loss_recon: 0.0223, loss_latent: 0.0325, lr: 1.51e-05
+10:55:23 - INFO - Epoch 89/150 [val]   loss_total: 1.2089, loss_recon: 1.0776
+10:58:34 - INFO - Epoch 90/150 [train] loss_total: 0.2997, loss_recon: 0.0222, loss_latent: 0.0346, lr: 1.46e-05
+10:58:39 - INFO - Epoch 90/150 [val]   loss_total: 1.2230, loss_recon: 1.0853
+11:01:50 - INFO - Epoch 91/150 [train] loss_total: 0.2987, loss_recon: 0.0222, loss_latent: 0.0356, lr: 1.42e-05
+11:01:55 - INFO - Epoch 91/150 [val]   loss_total: 1.2311, loss_recon: 1.0823
+11:05:05 - INFO - Epoch 92/150 [train] loss_total: 0.2986, loss_recon: 0.0222, loss_latent: 0.0367, lr: 1.38e-05
+11:05:10 - INFO - Epoch 92/150 [val]   loss_total: 1.2095, loss_recon: 1.0622
+11:08:21 - INFO - Epoch 93/150 [train] loss_total: 0.2982, loss_recon: 0.0221, loss_latent: 0.0378, lr: 1.34e-05
+11:08:26 - INFO - Epoch 93/150 [val]   loss_total: 1.1771, loss_recon: 1.0262
+11:08:27 - INFO -   -> New best model saved (val_recon=1.0262)
+11:11:38 - INFO - Epoch 94/150 [train] loss_total: 0.2974, loss_recon: 0.0220, loss_latent: 0.0383, lr: 1.30e-05
+11:11:43 - INFO - Epoch 94/150 [val]   loss_total: 1.2952, loss_recon: 1.1364
+11:14:53 - INFO - Epoch 95/150 [train] loss_total: 0.2963, loss_recon: 0.0220, loss_latent: 0.0388, lr: 1.26e-05
+11:14:58 - INFO - Epoch 95/150 [val]   loss_total: 1.2698, loss_recon: 1.1171
+11:18:08 - INFO - Epoch 96/150 [train] loss_total: 0.2965, loss_recon: 0.0219, loss_latent: 0.0395, lr: 1.22e-05
+11:18:13 - INFO - Epoch 96/150 [val]   loss_total: 1.2690, loss_recon: 1.1072
+11:21:24 - INFO - Epoch 97/150 [train] loss_total: 0.2955, loss_recon: 0.0219, loss_latent: 0.0400, lr: 1.18e-05
+11:21:29 - INFO - Epoch 97/150 [val]   loss_total: 1.3134, loss_recon: 1.1465
+11:24:39 - INFO - Epoch 98/150 [train] loss_total: 0.2953, loss_recon: 0.0220, loss_latent: 0.0404, lr: 1.14e-05
+11:24:45 - INFO - Epoch 98/150 [val]   loss_total: 1.2232, loss_recon: 1.0607
+11:27:55 - INFO - Epoch 99/150 [train] loss_total: 0.2946, loss_recon: 0.0219, loss_latent: 0.0410, lr: 1.10e-05
+11:28:00 - INFO - Epoch 99/150 [val]   loss_total: 1.2158, loss_recon: 1.0467
+11:31:11 - INFO - Epoch 100/150 [train] loss_total: 0.2934, loss_recon: 0.0217, loss_latent: 0.0409, lr: 1.06e-05
+11:31:16 - INFO - Epoch 100/150 [val]   loss_total: 1.2306, loss_recon: 1.0561
+11:31:17 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch100_model.pt
+11:34:27 - INFO - Epoch 101/150 [train] loss_total: 0.2935, loss_recon: 0.0217, loss_latent: 0.0416, lr: 1.03e-05
+11:34:32 - INFO - Epoch 101/150 [val]   loss_total: 1.2053, loss_recon: 1.0331
+11:37:43 - INFO - Epoch 102/150 [train] loss_total: 0.2934, loss_recon: 0.0217, loss_latent: 0.0421, lr: 9.88e-06
+11:37:48 - INFO - Epoch 102/150 [val]   loss_total: 1.2094, loss_recon: 1.0379
+11:40:58 - INFO - Epoch 103/150 [train] loss_total: 0.2921, loss_recon: 0.0216, loss_latent: 0.0423, lr: 9.50e-06
+11:41:03 - INFO - Epoch 103/150 [val]   loss_total: 1.1865, loss_recon: 1.0204
+11:41:05 - INFO -   -> New best model saved (val_recon=1.0204)
+11:44:15 - INFO - Epoch 104/150 [train] loss_total: 0.2915, loss_recon: 0.0216, loss_latent: 0.0428, lr: 9.14e-06
+11:44:20 - INFO - Epoch 104/150 [val]   loss_total: 1.1980, loss_recon: 1.0263
+11:47:31 - INFO - Epoch 105/150 [train] loss_total: 0.2916, loss_recon: 0.0217, loss_latent: 0.0429, lr: 8.78e-06
+11:47:36 - INFO - Epoch 105/150 [val]   loss_total: 1.2515, loss_recon: 1.0755
+11:50:46 - INFO - Epoch 106/150 [train] loss_total: 0.2906, loss_recon: 0.0216, loss_latent: 0.0432, lr: 8.42e-06
+11:50:51 - INFO - Epoch 106/150 [val]   loss_total: 1.2325, loss_recon: 1.0619
+11:54:02 - INFO - Epoch 107/150 [train] loss_total: 0.2904, loss_recon: 0.0215, loss_latent: 0.0438, lr: 8.07e-06
+11:54:07 - INFO - Epoch 107/150 [val]   loss_total: 1.1983, loss_recon: 1.0204
+11:54:09 - INFO -   -> New best model saved (val_recon=1.0204)
+11:57:19 - INFO - Epoch 108/150 [train] loss_total: 0.2899, loss_recon: 0.0215, loss_latent: 0.0440, lr: 7.72e-06
+11:57:24 - INFO - Epoch 108/150 [val]   loss_total: 1.2486, loss_recon: 1.0650
+12:00:35 - INFO - Epoch 109/150 [train] loss_total: 0.2892, loss_recon: 0.0215, loss_latent: 0.0445, lr: 7.39e-06
+12:00:40 - INFO - Epoch 109/150 [val]   loss_total: 1.2243, loss_recon: 1.0463
+12:03:50 - INFO - Epoch 110/150 [train] loss_total: 0.2893, loss_recon: 0.0214, loss_latent: 0.0451, lr: 7.05e-06
+12:03:55 - INFO - Epoch 110/150 [val]   loss_total: 1.2207, loss_recon: 1.0306
+12:07:06 - INFO - Epoch 111/150 [train] loss_total: 0.2887, loss_recon: 0.0214, loss_latent: 0.0454, lr: 6.73e-06
+12:07:11 - INFO - Epoch 111/150 [val]   loss_total: 1.2253, loss_recon: 1.0528
+12:10:21 - INFO - Epoch 112/150 [train] loss_total: 0.2881, loss_recon: 0.0214, loss_latent: 0.0455, lr: 6.40e-06
+12:10:27 - INFO - Epoch 112/150 [val]   loss_total: 1.2287, loss_recon: 1.0432
+12:13:37 - INFO - Epoch 113/150 [train] loss_total: 0.2875, loss_recon: 0.0214, loss_latent: 0.0460, lr: 6.09e-06
+12:13:42 - INFO - Epoch 113/150 [val]   loss_total: 1.2072, loss_recon: 1.0219
+12:16:53 - INFO - Epoch 114/150 [train] loss_total: 0.2874, loss_recon: 0.0214, loss_latent: 0.0460, lr: 5.78e-06
+12:16:58 - INFO - Epoch 114/150 [val]   loss_total: 1.2192, loss_recon: 1.0400
+12:20:08 - INFO - Epoch 115/150 [train] loss_total: 0.2868, loss_recon: 0.0213, loss_latent: 0.0462, lr: 5.48e-06
+12:20:13 - INFO - Epoch 115/150 [val]   loss_total: 1.2129, loss_recon: 1.0212
+12:23:24 - INFO - Epoch 116/150 [train] loss_total: 0.2869, loss_recon: 0.0214, loss_latent: 0.0466, lr: 5.19e-06
+12:23:29 - INFO - Epoch 116/150 [val]   loss_total: 1.2364, loss_recon: 1.0475
+12:26:39 - INFO - Epoch 117/150 [train] loss_total: 0.2863, loss_recon: 0.0213, loss_latent: 0.0471, lr: 4.90e-06
+12:26:44 - INFO - Epoch 117/150 [val]   loss_total: 1.2297, loss_recon: 1.0426
+12:29:55 - INFO - Epoch 118/150 [train] loss_total: 0.2859, loss_recon: 0.0214, loss_latent: 0.0473, lr: 4.62e-06
+12:30:00 - INFO - Epoch 118/150 [val]   loss_total: 1.2294, loss_recon: 1.0404
+12:33:10 - INFO - Epoch 119/150 [train] loss_total: 0.2851, loss_recon: 0.0212, loss_latent: 0.0473, lr: 4.34e-06
+12:33:15 - INFO - Epoch 119/150 [val]   loss_total: 1.2574, loss_recon: 1.0576
+12:36:26 - INFO - Epoch 120/150 [train] loss_total: 0.2853, loss_recon: 0.0212, loss_latent: 0.0478, lr: 4.08e-06
+12:36:31 - INFO - Epoch 120/150 [val]   loss_total: 1.2207, loss_recon: 1.0185
+12:36:32 - INFO -   -> New best model saved (val_recon=1.0185)
+12:39:43 - INFO - Epoch 121/150 [train] loss_total: 0.2845, loss_recon: 0.0212, loss_latent: 0.0480, lr: 3.82e-06
+12:39:48 - INFO - Epoch 121/150 [val]   loss_total: 1.2429, loss_recon: 1.0472
+12:42:58 - INFO - Epoch 122/150 [train] loss_total: 0.2849, loss_recon: 0.0213, loss_latent: 0.0482, lr: 3.57e-06
+12:43:03 - INFO - Epoch 122/150 [val]   loss_total: 1.2084, loss_recon: 1.0231
+12:46:14 - INFO - Epoch 123/150 [train] loss_total: 0.2844, loss_recon: 0.0212, loss_latent: 0.0485, lr: 3.33e-06
+12:46:19 - INFO - Epoch 123/150 [val]   loss_total: 1.2301, loss_recon: 1.0295
+12:49:29 - INFO - Epoch 124/150 [train] loss_total: 0.2843, loss_recon: 0.0212, loss_latent: 0.0484, lr: 3.09e-06
+12:49:34 - INFO - Epoch 124/150 [val]   loss_total: 1.2015, loss_recon: 1.0060
+12:49:36 - INFO -   -> New best model saved (val_recon=1.0060)
+12:52:47 - INFO - Epoch 125/150 [train] loss_total: 0.2839, loss_recon: 0.0212, loss_latent: 0.0489, lr: 2.86e-06
+12:52:52 - INFO - Epoch 125/150 [val]   loss_total: 1.2274, loss_recon: 1.0300
+12:52:53 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch125_model.pt
+12:56:03 - INFO - Epoch 126/150 [train] loss_total: 0.2835, loss_recon: 0.0211, loss_latent: 0.0490, lr: 2.64e-06
+12:56:08 - INFO - Epoch 126/150 [val]   loss_total: 1.2721, loss_recon: 1.0696
+12:59:19 - INFO - Epoch 127/150 [train] loss_total: 0.2834, loss_recon: 0.0211, loss_latent: 0.0494, lr: 2.43e-06
+12:59:24 - INFO - Epoch 127/150 [val]   loss_total: 1.2714, loss_recon: 1.0608
+13:02:35 - INFO - Epoch 128/150 [train] loss_total: 0.2830, loss_recon: 0.0212, loss_latent: 0.0496, lr: 2.23e-06
+13:02:40 - INFO - Epoch 128/150 [val]   loss_total: 1.2348, loss_recon: 1.0298
+13:05:50 - INFO - Epoch 129/150 [train] loss_total: 0.2827, loss_recon: 0.0211, loss_latent: 0.0496, lr: 2.03e-06
+13:05:55 - INFO - Epoch 129/150 [val]   loss_total: 1.2343, loss_recon: 1.0288
+13:09:06 - INFO - Epoch 130/150 [train] loss_total: 0.2825, loss_recon: 0.0210, loss_latent: 0.0499, lr: 1.85e-06
+13:09:11 - INFO - Epoch 130/150 [val]   loss_total: 1.2477, loss_recon: 1.0422
+13:12:21 - INFO - Epoch 131/150 [train] loss_total: 0.2823, loss_recon: 0.0211, loss_latent: 0.0500, lr: 1.67e-06
+13:12:26 - INFO - Epoch 131/150 [val]   loss_total: 1.2182, loss_recon: 1.0275
+13:15:37 - INFO - Epoch 132/150 [train] loss_total: 0.2820, loss_recon: 0.0210, loss_latent: 0.0502, lr: 1.50e-06
+13:15:42 - INFO - Epoch 132/150 [val]   loss_total: 1.2469, loss_recon: 1.0433
+13:18:53 - INFO - Epoch 133/150 [train] loss_total: 0.2820, loss_recon: 0.0210, loss_latent: 0.0504, lr: 1.34e-06
+13:18:58 - INFO - Epoch 133/150 [val]   loss_total: 1.2261, loss_recon: 1.0312
+13:22:08 - INFO - Epoch 134/150 [train] loss_total: 0.2819, loss_recon: 0.0211, loss_latent: 0.0502, lr: 1.19e-06
+13:22:13 - INFO - Epoch 134/150 [val]   loss_total: 1.2442, loss_recon: 1.0382
+13:25:24 - INFO - Epoch 135/150 [train] loss_total: 0.2817, loss_recon: 0.0210, loss_latent: 0.0505, lr: 1.05e-06
+13:25:29 - INFO - Epoch 135/150 [val]   loss_total: 1.2395, loss_recon: 1.0431
+13:28:40 - INFO - Epoch 136/150 [train] loss_total: 0.2816, loss_recon: 0.0210, loss_latent: 0.0504, lr: 9.13e-07
+13:28:45 - INFO - Epoch 136/150 [val]   loss_total: 1.2312, loss_recon: 1.0332
+13:31:55 - INFO - Epoch 137/150 [train] loss_total: 0.2816, loss_recon: 0.0210, loss_latent: 0.0504, lr: 7.88e-07
+13:32:00 - INFO - Epoch 137/150 [val]   loss_total: 1.2206, loss_recon: 1.0266
+13:35:11 - INFO - Epoch 138/150 [train] loss_total: 0.2812, loss_recon: 0.0210, loss_latent: 0.0506, lr: 6.72e-07
+13:35:16 - INFO - Epoch 138/150 [val]   loss_total: 1.2651, loss_recon: 1.0457
+13:38:26 - INFO - Epoch 139/150 [train] loss_total: 0.2812, loss_recon: 0.0210, loss_latent: 0.0508, lr: 5.65e-07
+13:38:31 - INFO - Epoch 139/150 [val]   loss_total: 1.2518, loss_recon: 1.0406
+13:41:42 - INFO - Epoch 140/150 [train] loss_total: 0.2814, loss_recon: 0.0210, loss_latent: 0.0510, lr: 4.68e-07
+13:41:47 - INFO - Epoch 140/150 [val]   loss_total: 1.2247, loss_recon: 1.0289
+13:44:58 - INFO - Epoch 141/150 [train] loss_total: 0.2810, loss_recon: 0.0209, loss_latent: 0.0510, lr: 4.00e-07
+13:45:03 - INFO - Epoch 141/150 [val]   loss_total: 1.2223, loss_recon: 1.0232
+13:48:13 - INFO - Epoch 142/150 [train] loss_total: 0.2807, loss_recon: 0.0209, loss_latent: 0.0509, lr: 4.00e-07
+13:48:18 - INFO - Epoch 142/150 [val]   loss_total: 1.2337, loss_recon: 1.0292
+13:51:29 - INFO - Epoch 143/150 [train] loss_total: 0.2807, loss_recon: 0.0209, loss_latent: 0.0509, lr: 4.00e-07
+13:51:34 - INFO - Epoch 143/150 [val]   loss_total: 1.2419, loss_recon: 1.0362
+13:54:44 - INFO - Epoch 144/150 [train] loss_total: 0.2809, loss_recon: 0.0211, loss_latent: 0.0509, lr: 4.00e-07
+13:54:50 - INFO - Epoch 144/150 [val]   loss_total: 1.2220, loss_recon: 1.0234
+13:58:01 - INFO - Epoch 145/150 [train] loss_total: 0.2810, loss_recon: 0.0209, loss_latent: 0.0511, lr: 4.00e-07
+13:58:06 - INFO - Epoch 145/150 [val]   loss_total: 1.2389, loss_recon: 1.0304
+14:01:16 - INFO - Epoch 146/150 [train] loss_total: 0.2807, loss_recon: 0.0209, loss_latent: 0.0509, lr: 4.00e-07
+14:01:21 - INFO - Epoch 146/150 [val]   loss_total: 1.2467, loss_recon: 1.0384
+14:04:31 - INFO - Epoch 147/150 [train] loss_total: 0.2808, loss_recon: 0.0210, loss_latent: 0.0513, lr: 4.00e-07
+14:04:36 - INFO - Epoch 147/150 [val]   loss_total: 1.2295, loss_recon: 1.0245
+14:07:47 - INFO - Epoch 148/150 [train] loss_total: 0.2806, loss_recon: 0.0209, loss_latent: 0.0510, lr: 4.00e-07
+14:07:52 - INFO - Epoch 148/150 [val]   loss_total: 1.2548, loss_recon: 1.0390
+14:11:02 - INFO - Epoch 149/150 [train] loss_total: 0.2810, loss_recon: 0.0210, loss_latent: 0.0512, lr: 4.00e-07
+14:11:08 - INFO - Epoch 149/150 [val]   loss_total: 1.2293, loss_recon: 1.0313
+14:14:18 - INFO - Epoch 150/150 [train] loss_total: 0.2805, loss_recon: 0.0210, loss_latent: 0.0511, lr: 4.00e-07
+14:14:23 - INFO - Epoch 150/150 [val]   loss_total: 1.2347, loss_recon: 1.0251
+14:14:25 - INFO -   Checkpoint saved: output/eurosat-rqvae-4x4x2-k1024/epoch150_model.pt
+14:14:25 - INFO - ============================================================
+14:14:25 - INFO - Extracting RQ codes for NAC...
+14:14:41 - INFO - Saved 24300 code sequences to code/codes.txt
+14:14:41 - INFO - Code shape per image: 4x4x2 = 32 indices
+14:14:41 - INFO - Copied codes to ../nac/data/codes4x4x2.txt
+14:14:41 - INFO - Done! You can now run: cd ../nac && python nac_eurosat.py

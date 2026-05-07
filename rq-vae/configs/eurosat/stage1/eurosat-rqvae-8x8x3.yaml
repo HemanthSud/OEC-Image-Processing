@@ -12,8 +12,8 @@ arch:
     bottleneck_type: rq
     embed_dim: 256
     n_embed: 2048
-    latent_shape: [ 4, 4, 256 ]
-    code_shape:   [ 4, 4, 4 ]
+    latent_shape: [ 8, 8, 256 ]
+    code_shape:   [ 8, 8, 3 ]
     shared_codebook: true
     decay: 0.99
     restart_unused_codes: true
@@ -28,7 +28,7 @@ arch:
     in_channels: 3
     out_ch: 3
     ch: 128
-    ch_mult: [ 1, 2, 2, 4, 4 ]
+    ch_mult: [ 1, 2, 2, 4 ]
     num_res_blocks: 2
     attn_resolutions: [ 8 ]
     dropout: 0.00

@@ -1,7 +1,3 @@
-# RQ-VAE config for EuroSAT RGB — 4×4 latent, depth 1
-# More aggressive compression: 64×64 → 4×4 spatial (4 downsamples)
-# Code shape: [4, 4, 1] → 16 positions × depth 1
-
 dataset:
   type: eurosat
   root: ../EuroSAT_RGB

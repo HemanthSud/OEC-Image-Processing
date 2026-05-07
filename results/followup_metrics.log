@@ -1,0 +1,82 @@
+
+============================================================
+Evaluating: eurosat-rqvae-8x8x2
+============================================================
+Working with z of shape (1, 256, 8, 8) = 16384 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 8x8x2
+  PSNR:  31.30 dB
+  SSIM:  0.8273
+  LPIPS: 0.1259
+  FID:   14.24
+
+============================================================
+Evaluating: eurosat-rqvae-8x8x3
+============================================================
+Working with z of shape (1, 256, 8, 8) = 16384 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 8x8x3
+  PSNR:  32.50 dB
+  SSIM:  0.8546
+  LPIPS: 0.1037
+  FID:   13.43
+
+============================================================
+Evaluating: eurosat-rqvae-4x4x2
+============================================================
+Working with z of shape (1, 256, 4, 4) = 4096 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 4x4x2
+  PSNR:  27.05 dB
+  SSIM:  0.6670
+  LPIPS: 0.2668
+  FID:   26.84
+
+============================================================
+Evaluating: eurosat-rqvae-4x4x3
+============================================================
+Working with z of shape (1, 256, 4, 4) = 4096 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 4x4x3
+  PSNR:  27.34 dB
+  SSIM:  0.6842
+  LPIPS: 0.2545
+  FID:   24.81
+
+============================================================
+Evaluating: eurosat-rqvae-4x4x2-k1024
+============================================================
+Working with z of shape (1, 256, 4, 4) = 4096 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 4x4x2
+  PSNR:  26.84 dB
+  SSIM:  0.6591
+  LPIPS: 0.2738
+  FID:   29.32
+
+============================================================
+Evaluating: eurosat-rqvae-4x4x3-k1024
+============================================================
+Working with z of shape (1, 256, 4, 4) = 4096 dimensions.
+[EuroSAT] Found 2700 images (test)
+loaded pretrained LPIPS loss from /home/hsudhah/Research-clean/Research-clean/rq-vae/rqvae/losses/vqgan/.caches/vgg.pth
+  Code shape: 4x4x3
+  PSNR:  27.19 dB
+  SSIM:  0.6755
+  LPIPS: 0.2683
+  FID:   28.56
+
+======================================================================
+Model                PSNR(dB)   SSIM       LPIPS      FID       
+----------------------------------------------------------------------
+eurosat-rqvae-8x8x2  31.30      0.8273     0.1259     14.24     
+eurosat-rqvae-8x8x3  32.50      0.8546     0.1037     13.43     
+eurosat-rqvae-4x4x2  27.05      0.6670     0.2668     26.84     
+eurosat-rqvae-4x4x3  27.34      0.6842     0.2545     24.81     
+eurosat-rqvae-4x4x2-k1024 26.84      0.6591     0.2738     29.32     
+eurosat-rqvae-4x4x3-k1024 27.19      0.6755     0.2683     28.56     

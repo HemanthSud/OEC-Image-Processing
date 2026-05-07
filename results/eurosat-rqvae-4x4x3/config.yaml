@@ -4,7 +4,6 @@ dataset:
   split_indices_path: ../eurosat_split_indices.pt
   transforms:
     type: eurosat
-
 arch:
   type: rq-vae
   code_hier: 1
@@ -12,15 +11,19 @@ arch:
     bottleneck_type: rq
     embed_dim: 256
     n_embed: 2048
-    latent_shape: [ 4, 4, 256 ]
-    code_shape:   [ 4, 4, 4 ]
+    latent_shape:
+    - 4
+    - 4
+    - 256
+    code_shape:
+    - 4
+    - 4
+    - 3
     shared_codebook: true
     decay: 0.99
     restart_unused_codes: true
-
     loss_type: mse
     latent_loss_weight: 0.25
-
   ddconfig:
     double_z: false
     z_channels: 256
@@ -28,42 +31,43 @@ arch:
     in_channels: 3
     out_ch: 3
     ch: 128
-    ch_mult: [ 1, 2, 2, 4, 4 ]
+    ch_mult:
+    - 1
+    - 2
+    - 2
+    - 4
+    - 4
     num_res_blocks: 2
-    attn_resolutions: [ 8 ]
-    dropout: 0.00
-
+    attn_resolutions:
+    - 8
+    dropout: 0.0
   checkpointing: true
-
-
 optimizer:
   type: adam
-  init_lr: 4.0e-5
+  init_lr: 4.0e-05
   weight_decay: 0.0
-  betas: [0.5, 0.9]
+  betas:
+  - 0.5
+  - 0.9
   warmup:
     epoch: 5
     multiplier: 1
     buffer_epoch: 0
-    min_lr: 4.0e-5
+    min_lr: 4.0e-05
     mode: fix
-
-
 experiment:
   batch_size: 16
   epochs: 150
-  save_ckpt_freq: 5
+  save_ckpt_freq: 25
   test_freq: 1
-
 gan:
   disc:
     arch:
       in_channels: 3
       num_layers: 2
-      use_actnorm: False
+      use_actnorm: false
       ndf: 64
-      spectral_norm: False
-
+      spectral_norm: false
   loss:
     disc_loss: hinge
     gen_loss: vanilla

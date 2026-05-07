@@ -1,15 +1,3 @@
-"""
-Standalone RQ-VAE training script for EuroSAT.
-Works on CPU and MPS (Apple Silicon) — no CUDA/DDP required.
-
-Usage:
-    cd rq-vae
-    python train_eurosat.py
-
-Outputs:
-    - Checkpoints saved to output/eurosat/
-    - RQ codes saved to code/codes.txt (used by NAC)
-"""
 import os
 import sys
 import math
@@ -23,7 +11,6 @@ import torchvision
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Add rq-vae to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rqvae.models.rqvae import RQVAE, get_rqvae
@@ -84,18 +71,36 @@ def main():
                         help='Override batch size')
     parser.add_argument('--lr', type=float, default=None,
                         help='Override learning rate')
+    parser.add_argument('--n-embed', type=int, default=None,
+                        help='Override codebook size')
+    parser.add_argument('--latent-loss-weight', type=float, default=None,
+                        help='Override latent quantization loss weight')
+    parser.add_argument('--perceptual-weight', type=float, default=None,
+                        help='Override LPIPS perceptual loss weight')
+    parser.add_argument('--disc-weight', type=float, default=None,
+                        help='Override discriminator loss weight')
+    parser.add_argument('--disc-start', type=int, default=None,
+                        help='Override GAN start epoch')
     args = parser.parse_args()
 
-    # Load config
     config = load_config(args.config)
 
-    # Overrides
     if args.epochs is not None:
         config.experiment.epochs = args.epochs
     if args.batch_size is not None:
         config.experiment.batch_size = args.batch_size
     if args.lr is not None:
         config.optimizer.init_lr = args.lr
+    if args.n_embed is not None:
+        config.arch.hparams.n_embed = args.n_embed
+    if args.latent_loss_weight is not None:
+        config.arch.hparams.latent_loss_weight = args.latent_loss_weight
+    if args.perceptual_weight is not None:
+        config.gan.loss.perceptual_weight = args.perceptual_weight
+    if args.disc_weight is not None:
+        config.gan.loss.disc_weight = args.disc_weight
+    if args.disc_start is not None:
+        config.gan.loss.disc_start = args.disc_start
 
     device = get_device()
     output_dir = args.output
@@ -104,11 +109,19 @@ def main():
     logger.info(f"Device: {device}")
     logger.info(f"Config: {args.config}")
     logger.info(f"Output: {output_dir}")
+    logger.info(
+        "Overrides -> "
+        f"code_shape={list(config.arch.hparams.code_shape)}, "
+        f"n_embed={config.arch.hparams.n_embed}, "
+        f"latent_loss_weight={config.arch.hparams.latent_loss_weight}, "
+        f"perceptual_weight={config.gan.loss.perceptual_weight}, "
+        f"disc_weight={config.gan.loss.disc_weight}, "
+        f"disc_start={config.gan.loss.disc_start}, "
+        f"lr={config.optimizer.init_lr}"
+    )
 
-    # Save config copy
     OmegaConf.save(config, os.path.join(output_dir, 'config.yaml'))
 
-    # Dataset
     dataset_cfg = OmegaConf.create({'transforms': config.dataset.transforms})
     transforms_trn = create_transforms(dataset_cfg, split='train', is_eval=False)
     transforms_val = create_transforms(dataset_cfg, split='val', is_eval=True)
@@ -130,7 +143,6 @@ def main():
     logger.info(f"Train: {len(dataset_trn)} images, Val: {len(dataset_val)} images")
     logger.info(f"Batch size: {bs}, Steps/epoch: {len(loader_trn)}")
 
-    # Model
     hps = dict(config.arch.hparams)
     ddconfig = dict(config.arch.ddconfig)
     model = RQVAE(**hps, ddconfig=ddconfig,
@@ -140,7 +152,6 @@ def main():
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
     logger.info(f"RQ-VAE parameters: {n_params:.2f}M")
 
-    # Discriminator
     gan_config = config.gan
     discriminator = NLayerDiscriminator(
         input_nc=gan_config.disc.arch.in_channels,
@@ -149,19 +160,16 @@ def main():
         ndf=gan_config.disc.arch.ndf,
     ).apply(weights_init).to(device)
 
-    # Losses
     perceptual_loss = LPIPS().to(device).eval()
     perceptual_weight = gan_config.loss.perceptual_weight
     disc_weight_factor = gan_config.loss.disc_weight
     gan_start_epoch = gan_config.loss.disc_start
 
-    # Optimizers
     lr = config.optimizer.init_lr
     betas = tuple(config.optimizer.betas)
     optimizer_g = torch.optim.Adam(model.parameters(), lr=lr, betas=betas)
     optimizer_d = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=betas)
 
-    # LR Scheduler
     total_steps = config.experiment.epochs * len(loader_trn)
     warmup_steps = config.optimizer.warmup.epoch * len(loader_trn)
 
@@ -174,18 +182,15 @@ def main():
     scheduler_g = torch.optim.lr_scheduler.LambdaLR(optimizer_g, lr_lambda)
     scheduler_d = torch.optim.lr_scheduler.LambdaLR(optimizer_d, lr_lambda)
 
-    # Training Loop
     epochs = config.experiment.epochs
     best_val_loss = float('inf')
 
-    # Clear code file
     os.makedirs('code', exist_ok=True)
     code_file = 'code/codes.txt'
     if os.path.exists(code_file):
         os.remove(code_file)
 
     for epoch in range(epochs):
-        # --- Train ---
         model.train()
         discriminator.train()
         use_gan = (epoch >= gan_start_epoch)
@@ -200,7 +205,6 @@ def main():
         for it, (imgs, _) in enumerate(pbar):
             imgs = imgs.to(device)
 
-            # --- Generator step ---
             optimizer_g.zero_grad()
             recon, quant_loss, codes = model(imgs)
             loss_out = model.compute_loss(recon, quant_loss, codes, xs=imgs)
@@ -227,7 +231,6 @@ def main():
             optimizer_g.step()
             scheduler_g.step()
 
-            # --- Discriminator step ---
             if use_gan:
                 optimizer_d.zero_grad()
                 logits_fake, logits_real = discriminator(
@@ -258,7 +261,6 @@ def main():
             f"lr: {scheduler_g.get_last_lr()[0]:.2e}"
         )
 
-        # --- Validation ---
         if (epoch + 1) % config.experiment.get('test_freq', 1) == 0:
             model.eval()
             val_loss_total = 0
@@ -281,7 +283,6 @@ def main():
                 f"loss_recon: {avg_val_loss:.4f}"
             )
 
-            # Save best
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 ckpt_path = os.path.join(output_dir, 'best_model.pt')
@@ -292,7 +293,6 @@ def main():
                 }, ckpt_path)
                 logger.info(f"  -> New best model saved (val_recon={avg_val_loss:.4f})")
 
-            # Save reconstructions
             if (epoch + 1) % 10 == 0 or epoch == 0:
                 with torch.no_grad():
                     sample_imgs = imgs[:8]
@@ -304,7 +304,6 @@ def main():
                     img_path = os.path.join(output_dir, f'recon_epoch{epoch+1:03d}.png')
                     torchvision.utils.save_image(grid, img_path)
 
-        # --- Save checkpoint periodically ---
         if (epoch + 1) % config.experiment.get('save_ckpt_freq', 5) == 0:
             ckpt_path = os.path.join(output_dir, f'epoch{epoch+1}_model.pt')
             torch.save({
@@ -315,12 +314,10 @@ def main():
             }, ckpt_path)
             logger.info(f"  Checkpoint saved: {ckpt_path}")
 
-    # Extract codes for NAC
     logger.info("=" * 60)
     logger.info("Extracting RQ codes for NAC...")
     model.eval()
 
-    # Clear any codes written during training
     if os.path.exists(code_file):
         os.remove(code_file)
 
@@ -341,7 +338,6 @@ def main():
                     f.write(' '.join(map(str, flat)) + '\n')
             n_images += codes_np.shape[0]
 
-    # Also extract val codes
     with torch.no_grad():
         for imgs, _ in tqdm(loader_val, desc="Extracting val codes"):
             imgs = imgs.to(device)
@@ -357,7 +353,6 @@ def main():
     logger.info(f"Saved {n_images} code sequences to {code_file}")
     logger.info(f"Code shape per image: {h}x{w}x{depth} = {h*w*depth} indices")
 
-    # Copy to nac/data/ for convenience
     nac_code_file = os.path.join('..', 'nac', 'data', f'codes{h}x{w}x{depth}.txt')
     os.makedirs(os.path.dirname(nac_code_file), exist_ok=True)
     import shutil

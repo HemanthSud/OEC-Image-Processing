@@ -22,7 +22,7 @@ test_idx = perm[n_train + n_val:]
 
 torch.save(
     {"train": train_idx, "val": val_idx, "test": test_idx, "classes": ds.classes},
-    OUT_FILE    source /path/to/your/venv/bin/activate
+    OUT_FILE
 )
 
 print("Saved split file:", OUT_FILE)

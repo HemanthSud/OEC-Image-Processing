@@ -146,6 +146,20 @@ The `4x4` family became worse as depth increased:
 
 This suggests that for `64x64` EuroSAT images, overly small spatial latents may not benefit from deeper residual quantization.
 
+### Expected vs Observed Trend
+
+What was expected:
+
+- Increasing depth at a fixed spatial size would generally improve reconstruction quality.
+- Under the same overall code budget, RQ-VAE settings would typically outperform the corresponding VQ-VAE-style baseline.
+
+What was observed in the current runs:
+
+- The `4x4` family did not improve with depth, and instead became worse at higher depths.
+- The expected RQ-VAE advantage under similar code budgets was not consistently seen in the current results.
+
+This suggests that the current hyperparameter setting may not yet be well matched to `64x64` EuroSAT images, especially for smaller latent grids.
+
 ## Scientific Takeaways
 
 1. Spatial latent size mattered more than depth for these small images.
@@ -229,6 +243,36 @@ python train_eurosat.py \
   --epochs 150
 ```
 
+### 5a. Follow-Up Depth 2 and 3 Experiments
+
+Intermediate-depth configs are available for all three spatial sizes:
+
+- `configs/eurosat/stage1/eurosat-rqvae-8x8x2.yaml`
+- `configs/eurosat/stage1/eurosat-rqvae-8x8x3.yaml`
+- `configs/eurosat/stage1/eurosat-rqvae-4x4x2.yaml`
+- `configs/eurosat/stage1/eurosat-rqvae-4x4x3.yaml`
+- `configs/eurosat/stage1/eurosat-rqvae-2x2x2.yaml`
+- `configs/eurosat/stage1/eurosat-rqvae-2x2x3.yaml`
+
+Example:
+
+```bash
+python train_eurosat.py \
+  -m configs/eurosat/stage1/eurosat-rqvae-4x4x2.yaml \
+  -o output/eurosat-rqvae-4x4x2 \
+  --epochs 150
+```
+
+The training script also supports direct hyperparameter overrides for follow-up tuning. For example, to try a smaller codebook:
+
+```bash
+python train_eurosat.py \
+  -m configs/eurosat/stage1/eurosat-rqvae-4x4x3.yaml \
+  -o output/eurosat-rqvae-4x4x3-k1024 \
+  --epochs 150 \
+  --n-embed 1024
+```
+
 ### 6. Evaluate Reconstruction Metrics
 
 ```bash
@@ -250,8 +294,9 @@ python nac_eurosat.py
 The reconstruction study and metric evaluation are complete. The main remaining items are:
 
 1. Evaluate classification accuracy on reconstructed images for each compression setting.
-2. Investigate why `4x4` models degrade as depth increases.
-3. Integrate the compression pipeline into a more realistic downlink or deployment setting.
+2. Train additional `depth = 2` and `depth = 3` models to check whether the expected trend appears at intermediate depths.
+3. Tune hyperparameters such as codebook size and loss weights to see whether RQ-VAE gives the expected advantage under similar code budgets.
+4. Integrate the compression pipeline into a more realistic downlink or deployment setting.
 
 ## References
 
