@@ -18,15 +18,20 @@ import torch
 
 from .transforms import create_transforms
 from .eurosat import EuroSAT
+from .flair import FLAIR
 
 SMOKE_TEST = bool(os.environ.get("SMOKE_TEST", 0))
 
 
-def create_dataset(config, is_eval=False, logger=None):
-    transforms_trn = create_transforms(
-        config.dataset, split='train', is_eval=is_eval)
-    transforms_val = create_transforms(
-        config.dataset, split='val', is_eval=is_eval)
+def _dataset_max_samples(config, split):
+    key = f'max_{split}_samples'
+    return config.dataset.get(key, config.dataset.get('max_samples', None))
+
+
+def create_dataset_split(config, split='train', is_eval=False):
+    transform_split = 'train' if split == 'train' else 'val'
+    transforms_ = create_transforms(
+        config.dataset, split=transform_split, is_eval=is_eval or split != 'train')
 
     root = config.dataset.get('root', None)
 
@@ -34,12 +39,32 @@ def create_dataset(config, is_eval=False, logger=None):
         root = root if root else '../EuroSAT_RGB'
         split_indices_path = config.dataset.get(
             'split_indices_path', '../eurosat_split_indices.pt')
-        dataset_trn = EuroSAT(root, split='train', transform=transforms_trn,
-                              split_indices_path=split_indices_path)
-        dataset_val = EuroSAT(root, split='val', transform=transforms_val,
-                              split_indices_path=split_indices_path)
-    else:
-        raise ValueError('%s not supported...' % config.dataset.type)
+        return EuroSAT(root, split=split, transform=transforms_,
+                       split_indices_path=split_indices_path,
+                       max_samples=_dataset_max_samples(config, split))
+
+    if config.dataset.type in ('flair', 'flair1', 'flair_rgb'):
+        csv_key = f'{split}_csv'
+        csv_path = config.dataset.get(csv_key, None)
+        if csv_path is None and split == 'test':
+            csv_path = config.dataset.get('val_csv', None)
+        if csv_path is None:
+            raise ValueError(f"Missing dataset.{csv_key} for FLAIR split '{split}'")
+
+        channels = list(config.dataset.get('channels', [1, 2, 3]))
+        return FLAIR(csv_path=csv_path,
+                     split=split,
+                     transform=transforms_,
+                     channels=channels,
+                     data_root=config.dataset.get('data_root', None),
+                     max_samples=_dataset_max_samples(config, split))
+
+    raise ValueError('%s not supported...' % config.dataset.type)
+
+
+def create_dataset(config, is_eval=False, logger=None):
+    dataset_trn = create_dataset_split(config, split='train', is_eval=is_eval)
+    dataset_val = create_dataset_split(config, split='val', is_eval=True)
 
     if SMOKE_TEST:
         dataset_len = config.experiment.total_batch_size * 2

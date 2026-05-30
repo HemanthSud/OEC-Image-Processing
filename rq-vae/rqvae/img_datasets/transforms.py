@@ -17,10 +17,10 @@ import torchvision.transforms as transforms
 
 def create_transforms(config, split='train', is_eval=False):
     if 'eurosat' in config.transforms.type:
-        # EuroSAT images are already 64×64, no resize needed
+        image_size = config.transforms.get('image_size', 64)
         if split == 'train' and not is_eval:
             transforms_ = [
-                transforms.Resize((64, 64)),
+                transforms.Resize((image_size, image_size)),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomVerticalFlip(p=0.5),
                 transforms.ToTensor(),
@@ -28,10 +28,28 @@ def create_transforms(config, split='train', is_eval=False):
             ]
         else:
             transforms_ = [
-                transforms.Resize((64, 64)),
+                transforms.Resize((image_size, image_size)),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
             ]
+
+    elif 'flair' in config.transforms.type:
+        image_size = config.transforms.get('image_size', 512)
+        channels = config.transforms.get('channels', [1, 2, 3])
+        means = [0.5] * len(channels)
+        stds = [0.5] * len(channels)
+
+        transforms_ = []
+        if image_size:
+            transforms_.append(
+                transforms.Resize((image_size, image_size), antialias=True)
+            )
+        if split == 'train' and not is_eval:
+            transforms_.extend([
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=0.5),
+            ])
+        transforms_.append(transforms.Normalize(means, stds))
 
     elif config.transforms.type == 'none':
         transforms_ = []

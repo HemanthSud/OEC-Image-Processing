@@ -1,5 +1,8 @@
 research/
 EuroSAT_RGB/
+flair_aerial_train/
+flair_labels_train/
+data/
 *.tar.gz
 __pycache__/
 *.pyc

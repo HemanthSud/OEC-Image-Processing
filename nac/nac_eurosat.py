@@ -1,18 +1,19 @@
 """
-NAC (N-gram Arithmetic Coding) for EuroSAT RQ-VAE codes.
+NAC (N-gram Arithmetic Coding) for RQ-VAE codes.
 
 This script:
-  1. Reads RQ-VAE generated codes (8×8×D flattened per image)
+  1. Reads RQ-VAE generated codes (H×W×D flattened per image)
   2. Builds an N-gram frequency table from training codes
   3. Encodes/decodes test codes using arithmetic coding
   4. Reports compression rates and timing
 
 Usage:
     cd nac/
-    python nac_eurosat.py
+    python nac_eurosat.py --dataset flair --height 8 --width 8 --depth 4 --image-size 512
 """
 from ngram import NGramModel
 from arithmetic_coding import ArithmeticEncoder
+import argparse
 import sys
 import logging
 import os
@@ -32,19 +33,47 @@ def readcode(filename, n=None):
     return result
 
 
-# =================== Configuration ===================
-# N-gram order
-N = 2
-# K smoothing constant
-K = 0.1
-# Depth of RQ-VAE code
-D = 4
-# Spatial dimensions of EuroSAT latent (8×8 vs vehicle's 23×40)
-H, W = 8, 8
-# Train/test split
-N_TRAIN = 900
-N_TOTAL = 1000
-# ======================================================
+def parse_args():
+    parser = argparse.ArgumentParser(description='NAC for flattened RQ-VAE codes')
+    parser.add_argument('--dataset', default='eurosat',
+                        help='Dataset name used for logs/model names')
+    parser.add_argument('--height', type=int, default=8,
+                        help='Latent code grid height')
+    parser.add_argument('--width', type=int, default=8,
+                        help='Latent code grid width')
+    parser.add_argument('--depth', type=int, default=4,
+                        help='RQ depth')
+    parser.add_argument('--n-embed', type=int, default=2048,
+                        help='Codebook size')
+    parser.add_argument('--ngram', type=int, default=2,
+                        help='N-gram order')
+    parser.add_argument('--smoothing', type=float, default=0.1,
+                        help='Additive smoothing constant')
+    parser.add_argument('--n-train', type=int, default=900,
+                        help='Number of code sequences used to fit NAC')
+    parser.add_argument('--n-total', type=int, default=1000,
+                        help='Number of total sequences read before test slicing')
+    parser.add_argument('--image-size', type=int, default=64,
+                        help='Original square image size in pixels')
+    parser.add_argument('--channels', type=int, default=3,
+                        help='Original image channels')
+    parser.add_argument('--bits-per-pixel-channel', type=int, default=8,
+                        help='Raw bits per image channel')
+    parser.add_argument('--code-file', default=None,
+                        help='Optional path to codes text file')
+    return parser.parse_args()
+
+
+args = parse_args()
+
+N = args.ngram
+K = args.smoothing
+D = args.depth
+H, W = args.height, args.width
+N_TRAIN = args.n_train
+N_TOTAL = args.n_total
+BITS_PER_CODE = (args.n_embed - 1).bit_length()
+RAW_IMAGE_BITS = args.image_size * args.image_size * args.channels * args.bits_per_pixel_channel
 
 
 logger = logging.getLogger()
@@ -52,7 +81,7 @@ logger.setLevel(logging.INFO)
 
 os.makedirs("logs", exist_ok=True)
 
-logfile = f"logs/{N}gram_eurosat_{H}x{W}x{D}_log.txt"
+logfile = f"logs/{N}gram_{args.dataset}_{H}x{W}x{D}_log.txt"
 print("Log:", logfile)
 file_handler = logging.FileHandler(logfile, mode='w', encoding='utf-8')
 console_handler = logging.StreamHandler(sys.stdout)
@@ -64,11 +93,18 @@ console_handler.setFormatter(formatter)
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
-# Code file generated from RQ-VAE training on EuroSAT
-filename = f"data/codes{H}x{W}x{D}.txt"
+if args.code_file is not None:
+    filename = args.code_file
+elif args.dataset == 'eurosat':
+    filename = f"data/codes{H}x{W}x{D}.txt"
+else:
+    filename = f"data/{args.dataset}_codes{H}x{W}x{D}.txt"
+
 logger.info(f"N={N}, K={K}")
 logger.info(f"Code shape: {H}×{W}×{D} = {H*W*D} codes per image")
 logger.info(f"Data: {filename}")
+logger.info(f"Raw image bits: {RAW_IMAGE_BITS:,}")
+logger.info(f"Bits per code: {BITS_PER_CODE}")
 
 training_sequences = readcode(filename, N_TRAIN)
 
@@ -76,7 +112,7 @@ model = NGramModel(n=N, k=K, start_token=-1, end_token=-2)
 model.fit(training_sequences)
 
 os.makedirs("models", exist_ok=True)
-model.save(f"models/{N}gram_eurosat_{H}x{W}x{D}.pkl")
+model.save(f"models/{N}gram_{args.dataset}_{H}x{W}x{D}.pkl")
 
 encoder = ArithmeticEncoder(ngram_model=model, bits=32)
 print("Encoder Created")
@@ -86,9 +122,6 @@ codes = readcode(filename, N_TOTAL)[N_TRAIN:N_TOTAL]
 avgrate = []
 encode_times_ms = []
 decode_times_ms = []
-
-# Uncompressed size: each code index uses 11 bits (log2(2048) = 11)
-BITS_PER_CODE = 11
 
 for i in range(len(codes)):
     logger.info(f"Code: {i}")
@@ -106,9 +139,7 @@ for i in range(len(codes)):
     avgrate.append(rate)
     logger.info(f"Compression Rate: {rate:.2%}")
 
-    # Uncompressed image size: 64×64×3×8 = 98304 bits
-    raw_image_bits = 64 * 64 * 3 * 8
-    compression_ratio = raw_image_bits / len(encoded_bits)
+    compression_ratio = RAW_IMAGE_BITS / len(encoded_bits)
     logger.info(f"vs Raw Image Compression Ratio: {compression_ratio:.1f}×")
 
     t0 = time.perf_counter()
@@ -128,7 +159,7 @@ logger.info("=" * 60)
 logger.info(
     f"Average Compression Rate (vs uncompressed codes): {sum(avgrate)/len(avgrate):.2%}")
 avg_raw_ratio = sum(
-    64*64*3*8 / (len(encoder.encode(codes[i])))
+    RAW_IMAGE_BITS / (len(encoder.encode(codes[i])))
     for i in range(len(codes))
 ) / len(codes)
 logger.info(f"Average Compression Ratio (vs raw RGB): {avg_raw_ratio:.1f}×")

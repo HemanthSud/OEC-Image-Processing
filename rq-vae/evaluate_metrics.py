@@ -5,14 +5,16 @@ Computes PSNR, SSIM, LPIPS, and FID on test set reconstructions.
 Usage:
     python evaluate_metrics.py --output-dirs output/8x8x4 output/4x4x4
 """
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import yaml
 from omegaconf import OmegaConf
 from rqvae.losses.vqgan.lpips import LPIPS
-from rqvae.img_datasets.transforms import create_transforms
-from rqvae.img_datasets.eurosat import EuroSAT
+from rqvae.img_datasets import create_dataset_split
 from rqvae.models.rqvae.rqvae import RQVAE
-import os
-import sys
 import math
 import argparse
 import numpy as np
@@ -22,8 +24,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def compute_psnr(recon, orig):
@@ -204,6 +204,8 @@ def main():
     parser.add_argument('--output-dirs', nargs='+', required=True,
                         help='Paths to trained model output directories')
     parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--split', choices=['train', 'val', 'test'], default='test',
+                        help='Dataset split to evaluate. Use val if the FLAIR test archive is not installed.')
     parser.add_argument('--no-fid', action='store_true',
                         help='Skip FID computation')
     args = parser.parse_args()
@@ -220,18 +222,10 @@ def main():
 
         model, config = load_model_from_dir(out_dir, device)
 
-        # Load test set
-        dataset_cfg = OmegaConf.create(
-            {'transforms': config.dataset.transforms})
-        transforms_test = create_transforms(
-            dataset_cfg, split='val', is_eval=True)
-        root = config.dataset.get('root', '../EuroSAT_RGB')
-        split_path = config.dataset.get(
-            'split_indices_path', '../eurosat_split_indices.pt')
-        dataset_test = EuroSAT(root, split='test', transform=transforms_test,
-                               split_indices_path=split_path)
-        loader = DataLoader(dataset_test, batch_size=args.batch_size, shuffle=False,
-                            num_workers=4, pin_memory=True)
+        dataset_eval = create_dataset_split(config, split=args.split, is_eval=True)
+        num_workers = config.experiment.get('num_workers', 4)
+        loader = DataLoader(dataset_eval, batch_size=args.batch_size, shuffle=False,
+                            num_workers=num_workers, pin_memory=True)
 
         results = compute_all_metrics(model, loader, device,
                                       compute_fid_flag=not args.no_fid)
@@ -250,6 +244,7 @@ def main():
 
     # Summary table
     print(f'\n{"="*70}')
+    print(f'Evaluated split: {args.split}')
     print(f'{"Model":<20} {"PSNR(dB)":<10} {"SSIM":<10} {"LPIPS":<10} {"FID":<10}')
     print(f'{"-"*70}')
     for name, r in all_results.items():

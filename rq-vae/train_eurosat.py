@@ -14,8 +14,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rqvae.models.rqvae import RQVAE, get_rqvae
-from rqvae.img_datasets.eurosat import EuroSAT
-from rqvae.img_datasets.transforms import create_transforms
+from rqvae.img_datasets import create_dataset
 from rqvae.losses.vqgan.lpips import LPIPS
 from rqvae.losses.vqgan.discriminator import NLayerDiscriminator, weights_init
 from rqvae.losses.vqgan.gan_loss import hinge_d_loss, vanilla_g_loss
@@ -59,7 +58,7 @@ def setup_logging(output_dir):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train RQ-VAE on EuroSAT')
+    parser = argparse.ArgumentParser(description='Train RQ-VAE on image datasets')
     parser.add_argument('-m', '--config', type=str,
                         default='configs/eurosat/stage1/eurosat-rqvae-8x8x4.yaml',
                         help='Path to config YAML')
@@ -81,6 +80,14 @@ def main():
                         help='Override discriminator loss weight')
     parser.add_argument('--disc-start', type=int, default=None,
                         help='Override GAN start epoch')
+    parser.add_argument('--max-samples', type=int, default=None,
+                        help='Limit every dataset split to this many samples')
+    parser.add_argument('--max-train-samples', type=int, default=None,
+                        help='Limit the training split to this many samples')
+    parser.add_argument('--max-val-samples', type=int, default=None,
+                        help='Limit the validation split to this many samples')
+    parser.add_argument('--max-test-samples', type=int, default=None,
+                        help='Limit the test split saved for metrics evaluation')
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -101,6 +108,14 @@ def main():
         config.gan.loss.disc_weight = args.disc_weight
     if args.disc_start is not None:
         config.gan.loss.disc_start = args.disc_start
+    if args.max_samples is not None:
+        config.dataset.max_samples = args.max_samples
+    if args.max_train_samples is not None:
+        config.dataset.max_train_samples = args.max_train_samples
+    if args.max_val_samples is not None:
+        config.dataset.max_val_samples = args.max_val_samples
+    if args.max_test_samples is not None:
+        config.dataset.max_test_samples = args.max_test_samples
 
     device = get_device()
     output_dir = args.output
@@ -117,28 +132,22 @@ def main():
         f"perceptual_weight={config.gan.loss.perceptual_weight}, "
         f"disc_weight={config.gan.loss.disc_weight}, "
         f"disc_start={config.gan.loss.disc_start}, "
-        f"lr={config.optimizer.init_lr}"
+        f"lr={config.optimizer.init_lr}, "
+        f"max_train_samples={config.dataset.get('max_train_samples', config.dataset.get('max_samples', None))}, "
+        f"max_val_samples={config.dataset.get('max_val_samples', config.dataset.get('max_samples', None))}, "
+        f"max_test_samples={config.dataset.get('max_test_samples', config.dataset.get('max_samples', None))}"
     )
 
     OmegaConf.save(config, os.path.join(output_dir, 'config.yaml'))
 
-    dataset_cfg = OmegaConf.create({'transforms': config.dataset.transforms})
-    transforms_trn = create_transforms(dataset_cfg, split='train', is_eval=False)
-    transforms_val = create_transforms(dataset_cfg, split='val', is_eval=True)
-
-    root = config.dataset.get('root', '../EuroSAT_RGB')
-    split_path = config.dataset.get('split_indices_path', '../eurosat_split_indices.pt')
-
-    dataset_trn = EuroSAT(root, split='train', transform=transforms_trn,
-                           split_indices_path=split_path)
-    dataset_val = EuroSAT(root, split='val', transform=transforms_val,
-                           split_indices_path=split_path)
+    dataset_trn, dataset_val = create_dataset(config, is_eval=False, logger=logger)
 
     bs = config.experiment.batch_size
+    num_workers = config.experiment.get('num_workers', 4)
     loader_trn = DataLoader(dataset_trn, batch_size=bs, shuffle=True,
-                            num_workers=4, pin_memory=True, drop_last=True)
+                            num_workers=num_workers, pin_memory=True, drop_last=True)
     loader_val = DataLoader(dataset_val, batch_size=bs, shuffle=False,
-                            num_workers=4, pin_memory=True)
+                            num_workers=num_workers, pin_memory=True)
 
     logger.info(f"Train: {len(dataset_trn)} images, Val: {len(dataset_val)} images")
     logger.info(f"Batch size: {bs}, Steps/epoch: {len(loader_trn)}")
@@ -186,7 +195,12 @@ def main():
     best_val_loss = float('inf')
 
     os.makedirs('code', exist_ok=True)
+    dataset_name = str(config.dataset.type)
+    code_shape = config.arch.hparams.code_shape
+    h, w, depth = code_shape[0], code_shape[1], code_shape[-1]
     code_file = 'code/codes.txt'
+    if dataset_name != 'eurosat':
+        code_file = f'code/{dataset_name}_codes{h}x{w}x{depth}.txt'
     if os.path.exists(code_file):
         os.remove(code_file)
 
@@ -321,11 +335,8 @@ def main():
     if os.path.exists(code_file):
         os.remove(code_file)
 
-    code_shape = config.arch.hparams.code_shape
-    depth = code_shape[-1]
-
     all_codes_loader = DataLoader(dataset_trn, batch_size=bs, shuffle=False,
-                                  num_workers=4, pin_memory=True)
+                                  num_workers=num_workers, pin_memory=True)
     n_images = 0
     with torch.no_grad():
         for imgs, _ in tqdm(all_codes_loader, desc="Extracting codes"):
@@ -349,16 +360,19 @@ def main():
                     f.write(' '.join(map(str, flat)) + '\n')
             n_images += codes_np.shape[0]
 
-    h, w = code_shape[0], code_shape[1]
     logger.info(f"Saved {n_images} code sequences to {code_file}")
     logger.info(f"Code shape per image: {h}x{w}x{depth} = {h*w*depth} indices")
 
-    nac_code_file = os.path.join('..', 'nac', 'data', f'codes{h}x{w}x{depth}.txt')
+    if dataset_name == 'eurosat':
+        nac_filename = f'codes{h}x{w}x{depth}.txt'
+    else:
+        nac_filename = f'{dataset_name}_codes{h}x{w}x{depth}.txt'
+    nac_code_file = os.path.join('..', 'nac', 'data', nac_filename)
     os.makedirs(os.path.dirname(nac_code_file), exist_ok=True)
     import shutil
     shutil.copy2(code_file, nac_code_file)
     logger.info(f"Copied codes to {nac_code_file}")
-    logger.info("Done! You can now run: cd ../nac && python nac_eurosat.py")
+    logger.info("Done! You can now run NAC from ../nac with the matching dataset/code shape.")
 
 
 if __name__ == '__main__':

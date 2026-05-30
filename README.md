@@ -1,14 +1,14 @@
-# RQ-VAE EuroSAT Image Compression for Orbital Edge Computing
+# RQ-VAE Satellite Image Compression for Orbital Edge Computing
 
 This repository contains an Orbital Edge Computing (OEC) research project on satellite image compression using Residual Quantized Variational Autoencoders (RQ-VAE) and N-gram Arithmetic Coding (NAC).
 
-The project studies how different compression levels affect EuroSAT image reconstruction quality and sets up downstream classification evaluation in bandwidth-constrained satellite settings.
+The project studies how different compression levels affect satellite and aerial image reconstruction quality. It started with EuroSAT RGB and now includes an added FLAIR-1 path for native `512x512` aerial imagery.
 
 ## Project Motivation
 
 Satellites must transmit imagery to Earth under strict bandwidth limits. For orbital edge computing, compression is not only about reducing size, but also about preserving the information needed for downstream tasks such as land-use classification.
 
-This project explores that trade-off by training multiple RQ-VAE compression models on EuroSAT and comparing their reconstruction quality across several latent sizes and quantization depths.
+This project explores that trade-off by training multiple RQ-VAE compression models on EuroSAT and FLAIR-1 and comparing reconstruction quality across latent sizes and quantization depths.
 
 ## Research Context
 
@@ -17,7 +17,7 @@ This work was carried out in NICE Lab at North Carolina State University.
 - Researcher: Hemanth Sudhaharan
 - Graduate mentor: Xuanhao Luo
 - Faculty advisor: Dr. Yuchen Liu
-- Timeline: February 2026 to 
+- Timeline: February 2026 to present
 
 ## Project Goal
 
@@ -32,10 +32,11 @@ Evaluate how different compression settings affect:
 - Server: NCSU cluster (`eb3-2402-grd04.csc.ncsu.edu`)
 - GPUs: 2 x NVIDIA RTX A6000 (48 GB each)
 - Training time: about 34 hours for the initial 9-model sweep using dual-GPU parallel runs
-- Dataset: EuroSAT RGB
-- Dataset size: 27,000 images
-- Classes: 10 land-use classes
-- Image size: `64x64` RGB
+- Primary dataset: EuroSAT RGB
+- EuroSAT size: 27,000 images across 10 land-use classes
+- EuroSAT image size: `64x64` RGB
+- Added dataset: FLAIR-1 RGB aerial patches
+- FLAIR-1 image size: native `512x512` RGB patches loaded from official CSVs
 
 ## What Was Completed
 
@@ -108,6 +109,14 @@ Follow-up metrics were saved in:
 3. Organized configs, metrics, and outputs.
 4. Prepared the project for GitHub publishing.
 
+### Phase 8: FLAIR-1 Extension
+
+1. Added a FLAIR-1 dataset loader for official CSV files and geospatial TIFF images through `rasterio`.
+2. Added native `512x512` FLAIR transforms and dataset split handling alongside the existing EuroSAT path.
+3. Added FLAIR `8x8xD` RQ-VAE configs for depths `1`, `2`, `3`, `4`, and `8`.
+4. Added `run_flair_8x8_sweep.sh` to run the FLAIR depth sweep with environment-variable overrides for epochs, batch size, learning rate, codebook size, and sample limits.
+5. Extended metric evaluation and NAC code export so non-EuroSAT datasets can be evaluated with the same pipeline.
+
 ## Model Configurations and Results
 
 The compression ratios below use the corrected formula from Xuanhao's feedback:
@@ -139,6 +148,22 @@ For the default `2048`-entry codebook, each code requires `11` bits. For the `10
 | 2x2 | 3 | 2048 | 12 | 11 | 23.92 | 0.5671 | 0.3627 | 76.07 | 744.7:1 |
 | 2x2 | 4 | 2048 | 16 | 11 | 24.68 | 0.5799 | 0.3474 | 70.20 | 558.5:1 |
 | 2x2 | 8 | 2048 | 32 | 11 | 25.72 | 0.6497 | 0.2985 | 42.35 | 279.3:1 |
+
+### FLAIR-1 Preliminary Subset Results
+
+The FLAIR-1 path is newer than the EuroSAT study. The table below records the first `flair-subset50` validation run for native `512x512` RGB FLAIR patches using depths `1`, `4`, and `8`. The run used a `5,000` image training subset and a `1,000` image validation subset, so these are preliminary subset results rather than final full-dataset conclusions.
+
+For FLAIR-1, the raw image size is:
+
+```text
+original image bits = 512 x 512 x 3 x 8 = 6,291,456 bits
+```
+
+| Model | Code Shape | Codebook | Codes/Image | PSNR (dB) | SSIM | LPIPS | FID | RQ Code Compression |
+|-------|------------|----------|-------------|-----------|------|-------|-----|---------------------|
+| flair-subset50-rqvae-8x8x1 | 8x8x1 | 2048 | 64 | 18.63 | 0.3253 | 0.5700 | 267.05 | 8936.7:1 |
+| flair-subset50-rqvae-8x8x4 | 8x8x4 | 2048 | 256 | 19.70 | 0.3637 | 0.5379 | 117.59 | 2234.2:1 |
+| flair-subset50-rqvae-8x8x8 | 8x8x8 | 2048 | 512 | 19.07 | 0.3694 | 0.5771 | 197.02 | 1117.1:1 |
 
 ## Main Findings
 
@@ -193,12 +218,17 @@ What was observed in the current runs:
 
 This suggests that the current hyperparameter setting may not yet be well matched to `64x64` EuroSAT images, especially for smaller latent grids.
 
+### FLAIR-1 Initial Observation
+
+The first FLAIR subset run shows the same pipeline can train and evaluate native `512x512` aerial patches, but quality is still early-stage. The best preliminary FLAIR subset result was `8x8x4` by PSNR and FID, while `8x8x8` slightly improved SSIM. More tuning is needed before comparing FLAIR directly with the completed EuroSAT sweep.
+
 ## Scientific Takeaways
 
 1. Spatial latent size mattered more than depth for these small images.
 2. An `8x8` latent grid was much more effective than `4x4` at preserving reconstruction quality.
 3. RQ-VAE can support multiple operating points depending on mission needs.
 4. Extreme compression appears feasible for constrained scenarios, though with lower image quality.
+5. The same RQ-VAE/NAC workflow can now be applied to larger aerial imagery, but FLAIR-1 needs separate tuning because its native resolution and visual structure differ from EuroSAT.
 
 ## Repository Structure
 
@@ -215,10 +245,15 @@ This suggests that the current hyperparameter setting may not yet be well matche
 |   `-- eurosat-rqvae-*/
 |-- rq-vae/
 |   |-- configs/eurosat/stage1/
+|   |-- configs/flair/stage1/
 |   |-- evaluate_metrics.py
+|   |-- run_flair_8x8_sweep.sh
 |   |-- train_eval_classifier.py
 |   |-- train_eurosat.py
 |   `-- rqvae/
+|       `-- img_datasets/
+|           |-- eurosat.py
+|           `-- flair.py
 |-- eurosat_split_indices.pt
 |-- rq_nac_eurosat_colab.ipynb
 `-- split_indices.py
@@ -226,10 +261,12 @@ This suggests that the current hyperparameter setting may not yet be well matche
 
 ## Key Files
 
-- `rq-vae/train_eurosat.py`: trains EuroSAT RQ-VAE models and exports latent codes
-- `rq-vae/evaluate_metrics.py`: computes PSNR, SSIM, LPIPS, and FID
+- `rq-vae/train_eurosat.py`: trains EuroSAT or FLAIR RQ-VAE models and exports latent codes
+- `rq-vae/evaluate_metrics.py`: computes PSNR, SSIM, LPIPS, and FID for train, validation, or test splits
+- `rq-vae/rqvae/img_datasets/flair.py`: loads FLAIR-1 images from official CSV files
+- `rq-vae/run_flair_8x8_sweep.sh`: runs the FLAIR `8x8xD` depth sweep
 - `rq-vae/train_eval_classifier.py`: baseline classifier training and planned reconstruction evaluation
-- `nac/nac_eurosat.py`: applies N-gram arithmetic coding to exported RQ-VAE codes
+- `nac/nac_eurosat.py`: applies N-gram arithmetic coding to exported EuroSAT or FLAIR RQ-VAE codes
 - `split_indices.py`: generates reproducible dataset splits
 - `results/summary.json`: combined quantitative results for the initial 9 configurations
 - `results/followup_metrics.log`: depth `2` and `3` follow-up metrics for `8x8` and `4x4`
@@ -323,19 +360,102 @@ cd ../nac
 python nac_eurosat.py
 ```
 
+## FLAIR-1 8x8 Experiments
+
+FLAIR-1 support has been added for native `512x512` RGB aerial patches. The current FLAIR experiment path is intentionally focused on the `8x8xD` family because that is the set planned for the SSH/server sweep.
+
+Download FLAIR-1 and place the actual data folders so the official CSV paths resolve from inside `rq-vae/`. The compression loader reads image paths from the CSVs and ignores masks, but the label folders can stay in the normal FLAIR layout. The expected layout is:
+
+```text
+Research-clean/
+|-- FLAIR-1-main/
+|   `-- csv_full/
+|-- flair_aerial_train/
+|-- flair_labels_train/
+`-- data/
+    |-- flair_1_aerial_test/
+    `-- flair_1_labels_test/
+```
+
+Install the extra TIFF/geospatial dependency:
+
+```bash
+pip install "rasterio<1.5"
+```
+
+Run the full `8x8xD` sweep on the SSH server:
+
+```bash
+cd rq-vae
+chmod +x run_flair_8x8_sweep.sh
+./run_flair_8x8_sweep.sh
+```
+
+Available FLAIR configs:
+
+- `configs/flair/stage1/flair-rqvae-8x8x1.yaml`
+- `configs/flair/stage1/flair-rqvae-8x8x2.yaml`
+- `configs/flair/stage1/flair-rqvae-8x8x3.yaml`
+- `configs/flair/stage1/flair-rqvae-8x8x4.yaml`
+- `configs/flair/stage1/flair-rqvae-8x8x8.yaml`
+
+If the server runs out of memory, lower the batch size without editing configs:
+
+```bash
+BATCH_SIZE=1 ./run_flair_8x8_sweep.sh
+```
+
+For the first RGB compression pass, use a smaller representative subset instead
+of the full FLAIR train split. This keeps each epoch around minutes instead of
+hours while still exercising the full training and reconstruction-metrics
+pipeline:
+
+```bash
+cd ~/Research-clean/rq-vae
+OUTPUT_PREFIX=flair-subset50-rqvae DEPTHS="1 4 8" EPOCHS=50 BATCH_SIZE=1 MAX_TRAIN_SAMPLES=5000 MAX_VAL_SAMPLES=1000 MAX_TEST_SAMPLES=1000 \
+  ./run_flair_8x8_sweep.sh
+```
+
+Evaluate the trained FLAIR models. Use `--split val` when the FLAIR test archive is not installed locally, and use the matching output names if you set `OUTPUT_PREFIX`:
+
+```bash
+python evaluate_metrics.py --split val --output-dirs \
+  output/flair-rqvae-8x8x1 \
+  output/flair-rqvae-8x8x2 \
+  output/flair-rqvae-8x8x3 \
+  output/flair-rqvae-8x8x4 \
+  output/flair-rqvae-8x8x8
+```
+
+Run NAC on one exported FLAIR code file:
+
+```bash
+cd ../nac
+python nac_eurosat.py \
+  --dataset flair \
+  --height 8 \
+  --width 8 \
+  --depth 4 \
+  --image-size 512 \
+  --n-train 45000 \
+  --n-total 61712
+```
+
 ## Possible Next Steps
 
-The reconstruction study and metric evaluation are complete. The main remaining items are:
+The EuroSAT reconstruction study and metric evaluation are complete. The main remaining items are:
 
 1. Evaluate classification accuracy on reconstructed images for each compression setting.
 2. Run NAC consistently across the updated code files and report entropy-coded bitrates.
-3. Tune hyperparameters such as codebook size and loss weights to see whether RQ-VAE gives the expected advantage under similar code budgets.
-4. Integrate the compression pipeline into a more realistic downlink or deployment setting.
+3. Complete the full FLAIR-1 `8x8xD` sweep beyond the initial subset run.
+4. Tune hyperparameters such as codebook size and loss weights to see whether RQ-VAE gives the expected advantage under similar code budgets.
+5. Integrate the compression pipeline into a more realistic downlink or deployment setting.
 
 ## References
 
 - RQ-VAE: "Residual Quantized Variational Autoencoders", CVPR 2023
 - EuroSAT dataset: https://github.com/phelber/eurosat
+- FLAIR-1 dataset and baseline code: https://github.com/IGNF/FLAIR-1
 
 ## Contact
 
