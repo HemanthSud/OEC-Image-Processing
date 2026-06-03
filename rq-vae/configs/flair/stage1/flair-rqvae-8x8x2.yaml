@@ -1,8 +1,8 @@
 dataset:
   type: flair
-  train_csv: ../FLAIR-1-main/csv_full/flair-1-paths-train.csv
-  val_csv: ../FLAIR-1-main/csv_full/flair-1-paths-val.csv
-  test_csv: ../FLAIR-1-main/csv_full/flair-1-paths-test.csv
+  train_csv: ../flair-1-paths-train.csv
+  val_csv: ../flair-1-paths-val.csv
+  test_csv: ../flair-1-paths-test.csv
   data_root: ..
   channels: [1, 2, 3]
   transforms:
@@ -58,7 +58,7 @@ experiment:
   batch_size: 2
   num_workers: 8
   epochs: 150
-  save_ckpt_freq: 5
+  save_ckpt_freq: 25
   test_freq: 1
 
 gan:

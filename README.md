@@ -364,17 +364,28 @@ python nac_eurosat.py
 
 FLAIR-1 support has been added for native `512x512` RGB aerial patches. The current FLAIR experiment path is intentionally focused on the `8x8xD` family because that is the set planned for the SSH/server sweep.
 
+### Dataset Size and Split
+
+The full FLAIR-1 official CSV splits contain:
+
+| Split | Full size | Used (50%) |
+|-------|-----------|------------|
+| Train | 47,587 | 23,800 |
+| Val | 14,125 | 7,050 |
+| Test | 15,700 | 7,850 |
+| **Total** | **77,412** | **38,700** |
+
+The recommended approach uses half of each official split (~38,700 total). Drawing from each official split preserves FLAIR's geographic and temporal domain separation across France.
+
 Download FLAIR-1 and place the actual data folders so the official CSV paths resolve from inside `rq-vae/`. The compression loader reads image paths from the CSVs and ignores masks, but the label folders can stay in the normal FLAIR layout. The expected layout is:
 
 ```text
 Research-clean/
-|-- FLAIR-1-main/
-|   `-- csv_full/
+|-- flair-1-paths-train.csv
+|-- flair-1-paths-val.csv
+|-- flair-1-paths-test.csv
 |-- flair_aerial_train/
-|-- flair_labels_train/
 `-- data/
-    |-- flair_1_aerial_test/
-    `-- flair_1_labels_test/
 ```
 
 Install the extra TIFF/geospatial dependency:
@@ -383,11 +394,18 @@ Install the extra TIFF/geospatial dependency:
 pip install "rasterio<1.5"
 ```
 
-Run the full `8x8xD` sweep on the SSH server:
+Run the `8x8xD` sweep on the SSH server with the EuroSAT-matched 27,000-image subset:
 
 ```bash
 cd rq-vae
 chmod +x run_flair_8x8_sweep.sh
+MAX_TRAIN_SAMPLES=23800 MAX_VAL_SAMPLES=7050 MAX_TEST_SAMPLES=7850 \
+  ./run_flair_8x8_sweep.sh
+```
+
+To run on the full dataset instead, omit the sample limits:
+
+```bash
 ./run_flair_8x8_sweep.sh
 ```
 
@@ -395,9 +413,9 @@ Available FLAIR configs:
 
 - `configs/flair/stage1/flair-rqvae-8x8x1.yaml`
 - `configs/flair/stage1/flair-rqvae-8x8x2.yaml`
-- `configs/flair/stage1/flair-rqvae-8x8x3.yaml`
 - `configs/flair/stage1/flair-rqvae-8x8x4.yaml`
 - `configs/flair/stage1/flair-rqvae-8x8x8.yaml`
+- `configs/flair/stage1/flair-rqvae-8x8x16.yaml`
 
 If the server runs out of memory, lower the batch size without editing configs:
 
@@ -405,29 +423,18 @@ If the server runs out of memory, lower the batch size without editing configs:
 BATCH_SIZE=1 ./run_flair_8x8_sweep.sh
 ```
 
-For the first RGB compression pass, use a smaller representative subset instead
-of the full FLAIR train split. This keeps each epoch around minutes instead of
-hours while still exercising the full training and reconstruction-metrics
-pipeline:
-
-```bash
-cd ~/Research-clean/rq-vae
-OUTPUT_PREFIX=flair-subset50-rqvae DEPTHS="1 4 8" EPOCHS=50 BATCH_SIZE=1 MAX_TRAIN_SAMPLES=5000 MAX_VAL_SAMPLES=1000 MAX_TEST_SAMPLES=1000 \
-  ./run_flair_8x8_sweep.sh
-```
-
-Evaluate the trained FLAIR models. Use `--split val` when the FLAIR test archive is not installed locally, and use the matching output names if you set `OUTPUT_PREFIX`:
+Evaluate the trained FLAIR models. Use `--split val` when the FLAIR test archive is not installed locally:
 
 ```bash
 python evaluate_metrics.py --split val --output-dirs \
   output/flair-rqvae-8x8x1 \
   output/flair-rqvae-8x8x2 \
-  output/flair-rqvae-8x8x3 \
   output/flair-rqvae-8x8x4 \
-  output/flair-rqvae-8x8x8
+  output/flair-rqvae-8x8x8 \
+  output/flair-rqvae-8x8x16
 ```
 
-Run NAC on one exported FLAIR code file:
+Run NAC on one exported FLAIR code file. Use the EuroSAT-matched split counts (21,600 train + 2,700 val = 24,300 total exported sequences):
 
 ```bash
 cd ../nac
@@ -437,8 +444,8 @@ python nac_eurosat.py \
   --width 8 \
   --depth 4 \
   --image-size 512 \
-  --n-train 45000 \
-  --n-total 61712
+  --n-train 23800 \
+  --n-total 30850
 ```
 
 ## Possible Next Steps

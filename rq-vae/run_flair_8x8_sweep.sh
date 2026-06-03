@@ -31,7 +31,7 @@ if [[ -n "${MAX_TEST_SAMPLES:-}" ]]; then
   extra_args+=(--max-test-samples "$MAX_TEST_SAMPLES")
 fi
 
-read -r -a depths <<< "${DEPTHS:-1 2 3 4 8}"
+read -r -a depths <<< "${DEPTHS:-1 2 4 8 16}"
 
 for depth in "${depths[@]}"; do
   config="configs/flair/stage1/flair-rqvae-8x8x${depth}.yaml"
