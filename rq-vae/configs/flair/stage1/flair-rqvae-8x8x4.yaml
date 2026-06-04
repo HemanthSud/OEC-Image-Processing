@@ -4,6 +4,7 @@ dataset:
   val_csv: ../flair-1-paths-val.csv
   test_csv: ../flair-1-paths-test.csv
   data_root: ..
+  png_root: ../flair_aerial_train_png
   channels: [1, 2, 3]
   transforms:
     type: flair

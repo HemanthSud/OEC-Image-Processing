@@ -57,7 +57,8 @@ def create_dataset_split(config, split='train', is_eval=False):
                      transform=transforms_,
                      channels=channels,
                      data_root=config.dataset.get('data_root', None),
-                     max_samples=_dataset_max_samples(config, split))
+                     max_samples=_dataset_max_samples(config, split),
+                     png_root=config.dataset.get('png_root', None))
 
     raise ValueError('%s not supported...' % config.dataset.type)
 
