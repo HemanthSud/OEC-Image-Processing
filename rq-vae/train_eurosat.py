@@ -161,6 +161,12 @@ def main():
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
     logger.info(f"RQ-VAE parameters: {n_params:.2f}M")
 
+    n_gpus = torch.cuda.device_count()
+    if n_gpus > 1:
+        logger.info(f"Using {n_gpus} GPUs with DataParallel")
+        model = torch.nn.DataParallel(model)
+    model_module = model.module if isinstance(model, torch.nn.DataParallel) else model
+
     gan_config = config.gan
     discriminator = NLayerDiscriminator(
         input_nc=gan_config.disc.arch.in_channels,
@@ -168,6 +174,8 @@ def main():
         use_actnorm=gan_config.disc.arch.use_actnorm,
         ndf=gan_config.disc.arch.ndf,
     ).apply(weights_init).to(device)
+    if n_gpus > 1:
+        discriminator = torch.nn.DataParallel(discriminator)
 
     perceptual_loss = LPIPS().to(device).eval()
     perceptual_weight = gan_config.loss.perceptual_weight
@@ -233,7 +241,7 @@ def main():
                 loss_gen = vanilla_g_loss(logits_fake)
                 g_weight = calculate_adaptive_weight(
                     loss_recon + perceptual_weight * loss_pcpt,
-                    loss_gen, last_layer=model.get_last_layer()
+                    loss_gen, last_layer=model_module.get_last_layer()
                 )
             else:
                 loss_gen = torch.zeros((), device=device)
@@ -302,7 +310,7 @@ def main():
                 ckpt_path = os.path.join(output_dir, 'best_model.pt')
                 torch.save({
                     'epoch': epoch + 1,
-                    'state_dict': model.state_dict(),
+                    'state_dict': model_module.state_dict(),
                     'optimizer': optimizer_g.state_dict(),
                 }, ckpt_path)
                 logger.info(f"  -> New best model saved (val_recon={avg_val_loss:.4f})")
@@ -322,9 +330,9 @@ def main():
             ckpt_path = os.path.join(output_dir, f'epoch{epoch+1}_model.pt')
             torch.save({
                 'epoch': epoch + 1,
-                'state_dict': model.state_dict(),
+                'state_dict': model_module.state_dict(),
                 'optimizer': optimizer_g.state_dict(),
-                'discriminator': discriminator.state_dict(),
+                'discriminator': (discriminator.module if isinstance(discriminator, torch.nn.DataParallel) else discriminator).state_dict(),
             }, ckpt_path)
             logger.info(f"  Checkpoint saved: {ckpt_path}")
 
@@ -341,7 +349,7 @@ def main():
     with torch.no_grad():
         for imgs, _ in tqdm(all_codes_loader, desc="Extracting codes"):
             imgs = imgs.to(device)
-            codes = model.get_codes(imgs)  # [B, h, w, D]
+            codes = model_module.get_codes(imgs)  # [B, h, w, D]
             codes_np = codes.cpu().numpy()
             with open(code_file, 'a') as f:
                 for i in range(codes_np.shape[0]):
