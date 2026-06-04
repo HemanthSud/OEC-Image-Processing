@@ -24,7 +24,8 @@ else:
 
 class FLAIR(Dataset):
     def __init__(self, csv_path, split='train', transform=None, channels=None,
-                 data_root=None, max_samples=None, return_path=False):
+                 data_root=None, max_samples=None, return_path=False,
+                 png_root=None):
         if rasterio is None:
             raise ImportError(
                 "FLAIR loading requires rasterio. Install it with `pip install rasterio`."
@@ -36,6 +37,7 @@ class FLAIR(Dataset):
         self.channels = channels or [1, 2, 3]
         self.data_root = Path(data_root).expanduser() if data_root else None
         self.return_path = return_path
+        self.png_root = Path(png_root).expanduser() if png_root else None
 
         if not self.csv_path.is_file():
             raise FileNotFoundError(f"FLAIR CSV not found: {self.csv_path}")
@@ -82,7 +84,30 @@ class FLAIR(Dataset):
     def __len__(self):
         return len(self.files)
 
+    def _png_path(self, tiff_path):
+        """Return the pre-converted PNG path if png_root is set, else None."""
+        if self.png_root is None:
+            return None
+        p = Path(tiff_path)
+        # strip the flair_aerial_train prefix to get the relative sub-path
+        parts = p.parts
+        try:
+            idx = parts.index('flair_aerial_train')
+            rel = Path(*parts[idx + 1:]).with_suffix('.png')
+        except ValueError:
+            rel = p.with_suffix('.png').name
+        candidate = self.png_root / rel
+        return str(candidate) if candidate.exists() else None
+
     def _read_image(self, img_path):
+        png = self._png_path(img_path)
+        if png is not None:
+            from PIL import Image as PILImage
+            img = PILImage.open(png).convert('RGB')
+            array = np.array(img).astype(np.float32) / 255.0
+            array = np.clip(array, 0.0, 1.0)
+            return torch.from_numpy(array.transpose(2, 0, 1))
+
         with rasterio.open(img_path) as src:
             array = src.read(self.channels)
             dtypes = src.dtypes
