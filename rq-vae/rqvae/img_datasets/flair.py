@@ -88,15 +88,16 @@ class FLAIR(Dataset):
         """Return the pre-converted PNG path if png_root is set, else None."""
         if self.png_root is None:
             return None
-        p = Path(tiff_path)
-        # strip the flair_aerial_train prefix to get the relative sub-path
+        # resolve() normalises away any '..' so parts are clean
+        p = Path(tiff_path).resolve()
+        png_root = self.png_root.resolve()
         parts = p.parts
         try:
             idx = parts.index('flair_aerial_train')
             rel = Path(*parts[idx + 1:]).with_suffix('.png')
         except ValueError:
             rel = p.with_suffix('.png').name
-        candidate = self.png_root / rel
+        candidate = png_root / rel
         return str(candidate) if candidate.exists() else None
 
     def _read_image(self, img_path):
