@@ -56,7 +56,7 @@ optimizer:
 
 experiment:
   batch_size: 2
-  num_workers: 8
+  num_workers: 32
   epochs: 150
   save_ckpt_freq: 25
   test_freq: 1
