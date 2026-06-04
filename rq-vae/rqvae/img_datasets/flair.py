@@ -105,13 +105,18 @@ class FLAIR(Dataset):
         """Compute PNG path at init time. Returns path string or None."""
         p = Path(tiff_path).resolve()
         parts = p.parts
+        # Try nested path first (mirrors flair_aerial_train subdirectory structure)
         try:
             idx = parts.index('flair_aerial_train')
             rel = Path(*parts[idx + 1:]).with_suffix('.png')
+            candidate = self.png_root / rel
+            if candidate.exists():
+                return str(candidate)
         except ValueError:
-            rel = Path(p.stem + '.png')
-        candidate = self.png_root / rel
-        return str(candidate) if candidate.exists() else None
+            pass
+        # Fallback: flat file (conversion script may have dropped subdirs)
+        flat = self.png_root / (p.stem + '.png')
+        return str(flat) if flat.exists() else None
 
     def __len__(self):
         return len(self.files)
