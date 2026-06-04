@@ -161,11 +161,7 @@ def main():
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
     logger.info(f"RQ-VAE parameters: {n_params:.2f}M")
 
-    n_gpus = torch.cuda.device_count()
-    if n_gpus > 1:
-        logger.info(f"Using {n_gpus} GPUs with DataParallel")
-        model = torch.nn.DataParallel(model)
-    model_module = model.module if isinstance(model, torch.nn.DataParallel) else model
+    model_module = model
 
     gan_config = config.gan
     discriminator = NLayerDiscriminator(
@@ -174,8 +170,6 @@ def main():
         use_actnorm=gan_config.disc.arch.use_actnorm,
         ndf=gan_config.disc.arch.ndf,
     ).apply(weights_init).to(device)
-    if n_gpus > 1:
-        discriminator = torch.nn.DataParallel(discriminator)
 
     perceptual_loss = LPIPS().to(device).eval()
     perceptual_weight = gan_config.loss.perceptual_weight
@@ -332,7 +326,7 @@ def main():
                 'epoch': epoch + 1,
                 'state_dict': model_module.state_dict(),
                 'optimizer': optimizer_g.state_dict(),
-                'discriminator': (discriminator.module if isinstance(discriminator, torch.nn.DataParallel) else discriminator).state_dict(),
+                'discriminator': discriminator.state_dict(),
             }, ckpt_path)
             logger.info(f"  Checkpoint saved: {ckpt_path}")
 
