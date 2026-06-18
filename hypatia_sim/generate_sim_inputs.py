@@ -62,13 +62,16 @@ for m in MODELS:
 # Number of images to simulate per model
 N_IMAGES = 100
 
-# Satellite node ID (source) — in Hypatia, satellites are nodes 0..N_sats-1.
-# We use node 0 as a representative satellite over the target ground station.
+# Satellite node ID (source) — Starlink 550km constellation has 1584 satellites
+# (72 orbits x 22 sats). Node 0 is a valid satellite; Hypatia routes dynamically
+# through whatever satellite is overhead at each time step.
 SAT_NODE_ID = 0
 
-# Ground station node ID. With a minimal 1-satellite + 1-GS topology,
-# the ground station is node 1.
-GS_NODE_ID = 1
+# Ground station node ID — in Hypatia, ground stations follow satellites:
+# nodes 1584..1683 for the top-100 city list.
+# We use New York (city ID 9, the closest top-100 city to NCSU Raleigh NC).
+# Node ID = 1584 + 9 = 1593.
+GS_NODE_ID = 1593
 
 # GSL bandwidth (Mbps) — 100 Mbps is a realistic Starlink Gen2 downlink
 GSL_DATA_RATE_MBPS = 100.0
@@ -96,7 +99,7 @@ OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run")
 
 # Path to satellite network state (relative to run_dir, pointing at Hypatia
 # satellite_networks_state generated data). Update this once Hypatia is set up.
-SAT_NETWORK_DIR = "../../../../hypatia/satellite_networks_state/gen_data/starlink_550_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_gs"
+SAT_NETWORK_DIR = "../../../../hypatia/paper/satellite_networks_state/gen_data/starlink_550_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls"
 SAT_ROUTES_DIR  = SAT_NETWORK_DIR + "/dynamic_state_100ms_for_200s"
 
 
