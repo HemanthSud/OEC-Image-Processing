@@ -1,0 +1,8 @@
+gs,sat_id,start_s,end_s,duration_s
+Tokyo,0,1890,2370,480
+Tokyo,1,0,380,380
+Tokyo,1,5920,6000,80
+Tokyo,2,3890,4340,450
+Sao-Paulo,0,4960,5430,470
+Sao-Paulo,1,3010,3400,390
+Sao-Paulo,2,1130,1280,150

@@ -56,19 +56,24 @@ def load_compute_delays():
 
 
 def load_burst_schedule():
-    """Map burst_id -> model name."""
+    """Map burst_id -> (ground_station, model name). gs is '' if not present."""
     path = os.path.join(RUN_DIR, "udp_burst_schedule.csv")
-    burst_to_model = {}
+    burst_to_key = {}
     with open(path) as f:
         for row in csv.reader(f):
             if not row:
                 continue
             burst_id = int(row[0])
             metadata = row[7] if len(row) > 7 else ""
+            gs, model = "", None
             for part in metadata.split(","):
                 if part.startswith("model="):
-                    burst_to_model[burst_id] = part.split("=")[1]
-    return burst_to_model
+                    model = part.split("=")[1]
+                elif part.startswith("gs="):
+                    gs = part.split("=")[1]
+            if model is not None:
+                burst_to_key[burst_id] = (gs, model)
+    return burst_to_key
 
 
 def load_incoming():
@@ -174,7 +179,7 @@ def print_topology():
 
 
 def analyse():
-    burst_to_model = load_burst_schedule()
+    burst_to_key   = load_burst_schedule()
     incoming       = load_incoming()
     compute_delays = load_compute_delays()
 
@@ -184,6 +189,11 @@ def analyse():
     latencies = defaultdict(list)
     delivered = defaultdict(int)
     total     = defaultdict(int)
+    # per (ground_station, model)
+    gs_latencies = defaultdict(list)
+    gs_delivered = defaultdict(int)
+    gs_total     = defaultdict(int)
+    stations     = []
 
     for parts in incoming:
         try:
@@ -194,11 +204,19 @@ def analyse():
         except (ValueError, IndexError):
             continue
 
-        model = burst_to_model.get(burst_id, "unknown")
+        gs, model = burst_to_key.get(burst_id, ("", "unknown"))
         total[model]     += exp_pkts
         delivered[model] += recv_pkts
         if avg_delay_ns > 0:
             latencies[model].append(avg_delay_ns / 1e6)
+
+        if gs:
+            if gs not in stations:
+                stations.append(gs)
+            gs_total[(gs, model)]     += exp_pkts
+            gs_delivered[(gs, model)] += recv_pkts
+            if avg_delay_ns > 0:
+                gs_latencies[(gs, model)].append(avg_delay_ns / 1e6)
 
     original_bytes = 512 * 512 * 3
 
@@ -251,6 +269,25 @@ def analyse():
     print("  E2E_lat  = total end-to-end = Compute + Net_lat")
     print("\n  Lower E2E + 0% drop = model viable for this orbital configuration")
     print("  High drop%           = compressed payload too large for available bandwidth")
+
+    # --- Per-Station Results ---
+    if stations:
+        print("\n=== Per-Station Results (network latency / drop per depth) ===\n")
+        for gs in stations:
+            print(f"  {gs}:")
+            print(f"    {'Model':<10} {'Delivered':>10} {'Drop%':>7} {'Net_lat':>9}")
+            print("    " + "-" * 40)
+            for m in MODELS:
+                key = (gs, m["name"])
+                tot = gs_total.get(key, 0)
+                dlv = gs_delivered.get(key, 0)
+                if tot == 0:
+                    continue
+                drop = (1 - dlv / tot) * 100
+                lats = gs_latencies.get(key, [])
+                net  = statistics.mean(lats) if lats else float("nan")
+                print(f"    {m['name']:<10} {dlv:>5}/{tot:<5} {drop:>6.1f}% {net:>8.2f}ms")
+            print()
 
 
 if __name__ == "__main__":

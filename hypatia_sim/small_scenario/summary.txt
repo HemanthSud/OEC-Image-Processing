@@ -1,0 +1,45 @@
+=================================================================
+Small Satellite Network Scenario — Summary
+=================================================================
+Constellation  Walker 6/2/1  (2 planes × 3 sats)
+Altitude       550.0 km    Inclination 53.0°
+Orbital period 5730 s  (95.5 min)
+ISLs (9 total): 0↔1  1↔2  2↔0  3↔4  4↔5  5↔3  0↔3  1↔4  2↔5
+Ground stations  Tokyo (35.6895°, 139.6917°),  Sao-Paulo (-23.5475°, -46.6361°)
+Simulation     6000 s  (10 s steps)
+Min elevation  10.0°
+
+── Contact Windows (satellite visibility) ───────────────────
+  Tokyo         4 windows  total 1390 s (23.2%)  avg 348 s  sats seen: [0, 1, 2]
+    sat 0  t=1890–2370 s  (480 s)
+    sat 1  t=0–380 s  (380 s)
+    sat 1  t=5920–6000 s  (80 s)
+    sat 2  t=3890–4340 s  (450 s)
+  Sao-Paulo     3 windows  total 1010 s (16.8%)  avg 337 s  sats seen: [0, 1, 2]
+    sat 0  t=4960–5430 s  (470 s)
+    sat 1  t=3010–3400 s  (390 s)
+    sat 2  t=1130–1280 s  (150 s)
+
+── End-to-End Path from Sat 0 (imaging satellite) ──────────
+  Tokyo         reachable 143/601 steps  |  prop delay  avg 30.11 ms  min 1.86 ms  max 45.98 ms  |  avg 1.7 hops
+  Sao-Paulo     reachable 104/601 steps  |  prop delay  avg 26.04 ms  min 2.38 ms  max 46.03 ms  |  avg 1.5 hops
+
+── ISL Distances at sample times ────────────────────────────
+  Link         t=0 km    t=1000 km    t=3000 km
+  --------------------------------------------
+  0↔1        11987.5      11987.5      11987.5
+  1↔2        11987.5      11987.5      11987.5
+  2↔0        11987.5      11987.5      11987.5
+  3↔4        11987.5      11987.5      11987.5
+  4↔5        11987.5      11987.5      11987.5
+  5↔3        11987.5      11987.5      11987.5
+  0↔3        11987.5       7234.8      11266.8
+  1↔4        11987.5      11761.8      12562.0
+  2↔5         7214.3      12196.9       7396.1
+
+Files in small_scenario/:
+  contact_windows.csv    satellite-GS visibility windows
+  link_availability.csv  ISL and GSL state at every time step
+  path_info.csv          routing path + delay per GS per step
+  summary.txt            this report
+=================================================================

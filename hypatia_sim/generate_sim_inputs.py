@@ -3,11 +3,11 @@ Generate Hypatia simulation inputs to evaluate RQ-VAE compression models
 under realistic LEO satellite downlink constraints.
 
 This script produces:
-  - udp_burst_schedule.csv  : one burst per RQ-VAE model per image
+  - udp_burst_schedule.csv  : one burst per RQ-VAE model per image per station
   - config_ns3.properties   : ns-3 simulation config
-  - ground_stations.txt     : ground station definition (NCSU)
+  - ground_stations.txt      : reference list of the selected AC nodes
 
-Usage (after installing Hypatia and building ns-3):
+Usage (after the satellite state is generated and ns-3 is built):
     python3 generate_sim_inputs.py
     # then run from ns3-sat-sim/simulator:
     # ./waf --run="main_satnet --run_dir='<abs_path_to_run_dir>'"
@@ -16,25 +16,26 @@ Simulation design
 -----------------
 Each RQ-VAE model compresses one 512x512 RGB aerial image into a different
 number of integer codes. We model each compressed image as a single UDP burst
-from a satellite node to a ground station. The simulator reports delivery
-latency and queue drops for each compression level, letting us compare which
-compression depth is actually viable under real orbital bandwidth/latency.
+from an imaging/compute satellite (RQ node) to a ground station (AC node). The
+simulator reports delivery latency and queue drops for each compression level,
+per ground station, letting us compare which compression depth is viable under
+real orbital bandwidth/latency and how that varies by location.
 
-Model parameters
-----------------
-Codebook size : 2048 entries  -> 11 bits per code  (log2(2048))
-Image size    : 512 x 512 x 3 x 8 = 6,291,456 bits (original)
-
-Satellite configuration (Starlink-like)
----------------------------------------
-GSL bandwidth : 100 Mbps  (conservative real-world LEO downlink)
-ISL bandwidth : 10 Gbps   (laser cross-links)
-Altitude      : ~550 km   -> ~3.6 ms one-way propagation to ground
+Topology (see topology_config.py for the single source of truth)
+----------------------------------------------------------------
+- Constellation : Starlink-550, 1584 satellites, +Grid ISLs (4/sat, 3168 total)
+- Ground stations: 5 chosen from Hypatia's EXISTING top-100 city list (no
+                   state regeneration), spread by longitude
+- RQ nodes      : all satellites are equal; one imaging/compute satellite is
+                  assigned per ground station as the burst source
+- Links         : GSL 100 Mbps, ISL 10 Gbps
 """
 
 import csv
 import os
 import math
+
+import topology_config as topo
 
 # ---------------------------------------------------------------------------
 # RQ-VAE model definitions
@@ -52,68 +53,84 @@ MODELS = [
 ORIGINAL_BITS = 512 * 512 * 3 * 8  # 6,291,456
 
 for m in MODELS:
-    m["bits"]             = m["codes"] * BITS_PER_CODE
-    m["bytes"]            = math.ceil(m["bits"] / 8)
+    m["bits"]              = m["codes"] * BITS_PER_CODE
+    m["bytes"]             = math.ceil(m["bits"] / 8)
     m["compression_ratio"] = ORIGINAL_BITS / m["bits"]
 
 # ---------------------------------------------------------------------------
-# Simulation parameters
+# Simulation parameters (topology pulled from topology_config)
 # ---------------------------------------------------------------------------
-# Number of images to simulate per model
-N_IMAGES = 100
+N_IMAGES = 100   # images per (ground station, model)
 
-# Satellite node ID (source) — Starlink 550km constellation has 1584 satellites
-# (72 orbits x 22 sats). Node 0 is a valid satellite; Hypatia routes dynamically
-# through whatever satellite is overhead at each time step.
-SAT_NODE_ID = 0
+SOURCE_SATELLITES  = topo.SOURCE_SATELLITES
+GSL_DATA_RATE_MBPS = topo.GSL_DATA_RATE_MBPS
+ISL_DATA_RATE_MBPS = topo.ISL_DATA_RATE_MBPS
+QUEUE_SIZE_PKTS    = topo.QUEUE_SIZE_PKTS
+DYNAMIC_STATE_UPDATE_NS = topo.DYNAMIC_STATE_UPDATE_NS
 
-# Ground station node ID — in Hypatia, ground stations follow satellites:
-# nodes 1584..1683 for the top-100 city list.
-# We use New York (city ID 9, the closest top-100 city to NCSU Raleigh NC).
-# Node ID = 1584 + 9 = 1593.
-GS_NODE_ID = 1593
+SIM_DURATION_NS = 10_000_000_000  # 10 seconds (ample for all bursts)
+BURST_GAP_NS    = 1_000_000       # 1 ms spacing between a station's bursts
 
-# GSL bandwidth (Mbps) — 100 Mbps is a realistic Starlink Gen2 downlink
-GSL_DATA_RATE_MBPS = 100.0
-
-# ISL bandwidth (Mbps)
-ISL_DATA_RATE_MBPS = 10000.0
-
-# Queue sizes (packets)
-QUEUE_SIZE_PKTS = 1000
-
-# Simulation duration — enough to send all bursts with margin
-# Longest model: 8x8x16 = 1024 codes * 11 bits = 11264 bits = 1408 bytes
-# At 100 Mbps: 1408 bytes / (100e6/8) = ~0.11 ms per image
-# 100 images = ~11 ms; use 10 seconds for plenty of margin
-SIM_DURATION_NS = 10_000_000_000  # 10 seconds
-
-# Inter-burst gap (ns) — space bursts 1 ms apart so they don't pile up
-BURST_GAP_NS = 1_000_000  # 1 ms
-
-# Dynamic state update interval
-DYNAMIC_STATE_UPDATE_NS = 100_000_000  # 100 ms
-
-# Output directory
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "run")
 
-# Path to satellite network state (relative to run_dir, pointing at Hypatia
-# satellite_networks_state generated data). Update this once Hypatia is set up.
+# Existing top-100 satellite state (already generated — no regeneration needed).
 SAT_NETWORK_DIR = "../../../../hypatia/paper/satellite_networks_state/gen_data/starlink_550_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls"
 SAT_ROUTES_DIR  = SAT_NETWORK_DIR + "/dynamic_state_100ms_for_200s"
 
 
-def bits_to_mbps(bits, duration_ns):
-    """Convert a total bit count and duration (ns) to Mbps."""
-    duration_s = duration_ns / 1e9
-    return bits / duration_s / 1e6
+def load_top100_stations():
+    """
+    Read the existing Hypatia top-100 ground station file.
+    Returns list of (index, name, lat, lon). Falls back to a built-in list if
+    the file is not reachable (e.g. running off-server for a dry test).
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), topo.TOP100_PATH)
+    stations = []
+    if os.path.exists(path):
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(",")
+                stations.append((int(parts[0]), parts[1],
+                                 float(parts[2]), float(parts[3])))
+        return stations
+    print(f"[warn] {path} not found — using fallback station list")
+    return list(topo.FALLBACK_STATIONS)
+
+
+def select_stations():
+    """
+    Choose NUM_GROUND_STATIONS AC nodes from the existing top-100 list.
+    Returns list of (index, name, lat, lon) in selection order.
+    """
+    allst = load_top100_stations()
+    n = topo.NUM_GROUND_STATIONS
+    sel = topo.GROUND_STATION_SELECTION
+
+    if isinstance(sel, (list, tuple)):
+        chosen = [s for s in allst if s[0] in set(sel)]
+    elif sel == "spread":
+        # Even spacing across stations sorted by longitude -> global spread.
+        by_lon = sorted(allst, key=lambda s: s[3])
+        if len(by_lon) <= n:
+            chosen = by_lon
+        else:
+            step = len(by_lon) / n
+            chosen = [by_lon[int(i * step)] for i in range(n)]
+    else:
+        chosen = allst[:n]
+
+    return chosen[:n]
+
+
+# Resolve the AC node set once at import time.
+STATIONS = select_stations()   # list of (index, name, lat, lon)
 
 
 def load_compute_delays():
-    """
-    Load per-model compute delays (ns) from profile_compute_delay.py output.
-    Returns dict: model_name -> delay_ns. Falls back to 0 if file missing.
-    """
+    """Load per-model compute delays (ns) from profile_compute_delay.py output."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "compute_delays.txt")
     delays = {}
     if os.path.exists(path):
@@ -122,7 +139,6 @@ def load_compute_delays():
                 line = line.strip()
                 if "," in line:
                     name, ns = line.split(",", 1)
-                    # Map output dir name to model name (e.g. flair-rqvae-8x8x1 -> 8x8x1)
                     for m in MODELS:
                         if m["name"] in name:
                             delays[m["name"]] = int(ns)
@@ -133,10 +149,10 @@ def generate_udp_burst_schedule():
     """
     Generate udp_burst_schedule.csv.
 
-    Each burst represents one compressed image being downlinked from the
-    RQ (satellite) node to the AC (ground/access) node after on-orbit
-    compression. Burst start times are offset by the RQ node computing
-    delay so the simulation reflects true end-to-end latency.
+    For every ground station, every model sends N_IMAGES bursts from that
+    station's assigned imaging/compute satellite (RQ node) down to the station
+    (AC node). Burst start times are offset by the RQ node computing delay so
+    the simulation reflects true end-to-end (compute + network) latency.
 
     UDP burst format:
         burst_id, from_node, to_node, target_rate_mbps,
@@ -145,28 +161,32 @@ def generate_udp_burst_schedule():
     compute_delays = load_compute_delays()
     rows = []
     burst_id = 0
-    cumulative_ns = 0
 
-    for model in MODELS:
-        duration_ns   = int((model["bytes"] * 8 / (GSL_DATA_RATE_MBPS * 1e6)) * 1e9)
-        duration_ns   = max(duration_ns, 1000)
-        compute_delay = compute_delays.get(model["name"], 0)
+    for si, (st_index, st_name, _, _) in enumerate(STATIONS):
+        ac_node = topo.gs_node_id(st_index)
+        rq_node = SOURCE_SATELLITES[si % len(SOURCE_SATELLITES)]
+        cumulative_ns = 0
 
-        for i in range(N_IMAGES):
-            # Start = cumulative offset + RQ node computing delay
-            start_ns = cumulative_ns + compute_delay
-            rows.append([
-                burst_id,
-                SAT_NODE_ID,   # RQ node
-                GS_NODE_ID,    # AC node
-                GSL_DATA_RATE_MBPS,
-                start_ns,
-                duration_ns,
-                "",
-                f"model={model['name']},image={i},rq_node={SAT_NODE_ID},ac_node={GS_NODE_ID},compute_delay_ns={compute_delay}"
-            ])
-            burst_id    += 1
-            cumulative_ns = start_ns + duration_ns + BURST_GAP_NS
+        for model in MODELS:
+            duration_ns   = int((model["bytes"] * 8 / (GSL_DATA_RATE_MBPS * 1e6)) * 1e9)
+            duration_ns   = max(duration_ns, 1000)
+            compute_delay = compute_delays.get(model["name"], 0)
+
+            for i in range(N_IMAGES):
+                start_ns = cumulative_ns + compute_delay
+                rows.append([
+                    burst_id,
+                    rq_node,   # RQ node (imaging + compute satellite)
+                    ac_node,   # AC node (ground station)
+                    GSL_DATA_RATE_MBPS,
+                    start_ns,
+                    duration_ns,
+                    "",
+                    f"gs={st_name},model={model['name']},image={i},"
+                    f"rq_node={rq_node},ac_node={ac_node},compute_delay_ns={compute_delay}"
+                ])
+                burst_id    += 1
+                cumulative_ns = start_ns + duration_ns + BURST_GAP_NS
 
     path = os.path.join(OUT_DIR, "udp_burst_schedule.csv")
     with open(path, "w", newline="") as f:
@@ -176,31 +196,23 @@ def generate_udp_burst_schedule():
     return rows
 
 
-def generate_ground_stations():
+def generate_ground_stations_reference():
     """
-    ground_stations.txt — NCSU coordinates as the receiving ground station.
+    Write a reference list of the selected AC nodes. The simulation itself uses
+    the ground stations baked into the generated satellite state; this file is
+    only for the analysis scripts and human reference. Indices match the state.
 
-    Format: id,name,latitude_deg,longitude_deg,elevation_m
-    (Hypatia auto-computes Cartesian coordinates from lat/lon/elev)
+    Format: top100_index,name,lat,lon,node_id
     """
-    # NCSU Raleigh, NC
-    stations = [
-        (0, "NCSU-Raleigh", 35.7796, -78.6382, 0),
-    ]
     path = os.path.join(OUT_DIR, "ground_stations.txt")
     with open(path, "w") as f:
-        for s in stations:
-            f.write(f"{s[0]},{s[1]},{s[2]},{s[3]},{s[4]}\n")
-    print(f"Wrote {len(stations)} ground stations to {path}")
+        for st_index, name, lat, lon in STATIONS:
+            f.write(f"{st_index},{name},{lat},{lon},{topo.gs_node_id(st_index)}\n")
+    print(f"Wrote {len(STATIONS)} selected ground stations to {path}")
 
 
 def generate_config():
-    """
-    config_ns3.properties — ns-3 simulation configuration.
-    """
-    total_bursts = len(MODELS) * N_IMAGES
-    # Estimate end time: last burst start + duration + 1 second margin
-    # rough upper bound
+    """config_ns3.properties — ns-3 simulation configuration."""
     config = f"""simulation_end_time_ns={SIM_DURATION_NS}
 simulation_seed=123456789
 
@@ -234,9 +246,22 @@ def print_summary():
     for m in MODELS:
         print(f"{m['name']:<10} {m['codes']:>6} {m['bits']:>10} {m['bytes']:>8} {m['compression_ratio']:>7.1f}x")
     print(f"\nOriginal image: {ORIGINAL_BITS:,} bits ({ORIGINAL_BITS//8:,} bytes)")
-    print(f"\nSimulation: {N_IMAGES} images per model, {len(MODELS)} models")
-    print(f"Total bursts: {N_IMAGES * len(MODELS)}")
-    print(f"GSL bandwidth: {GSL_DATA_RATE_MBPS} Mbps")
+
+    print("\n=== Topology (existing top-100 stations) ===")
+    print(f"Constellation : {topo.CONSTELLATION['name']} "
+          f"({topo.CONSTELLATION['num_satellites']} sats, "
+          f"{topo.CONSTELLATION['total_isls']} ISLs)")
+    print(f"{'Ground Station':<16} {'idx':>4} {'AC node':>8} {'RQ sat':>7} {'plane':>6}")
+    print("-" * 46)
+    for si, (st_index, name, _, _) in enumerate(STATIONS):
+        rq = SOURCE_SATELLITES[si % len(SOURCE_SATELLITES)]
+        plane, _ = topo.sat_plane_index(rq)
+        print(f"{name:<16} {st_index:>4} {topo.gs_node_id(st_index):>8} {rq:>7} {plane:>6}")
+
+    total = len(STATIONS) * len(MODELS) * N_IMAGES
+    print(f"\nBursts: {len(STATIONS)} stations x {len(MODELS)} models "
+          f"x {N_IMAGES} images = {total}")
+    print(f"GSL bandwidth: {GSL_DATA_RATE_MBPS} Mbps  |  ISL bandwidth: {ISL_DATA_RATE_MBPS/1000:.0f} Gbps")
     print(f"Simulation duration: {SIM_DURATION_NS/1e9:.1f} seconds")
 
 
@@ -247,25 +272,18 @@ def main():
     print_summary()
     print()
     generate_udp_burst_schedule()
-    generate_ground_stations()
+    generate_ground_stations_reference()
     generate_config()
 
     print(f"\n=== Files written to {OUT_DIR} ===")
     print("\nNext steps:")
-    print("1. Install Hypatia: https://github.com/snkas/hypatia")
-    print("2. Generate Starlink satellite network state:")
-    print("   cd hypatia/paper/satellite_networks_state")
-    print("   python3 main_helper.py")
-    print("3. Update SAT_NETWORK_DIR in this script to point at the generated state")
-    print("4. Build ns-3:")
-    print("   cd hypatia/ns3-sat-sim/simulator")
-    print("   ./waf configure --build-profile=optimized")
-    print("   ./waf")
-    print("5. Run simulation:")
+    print("1. Summarise topology: python3 extract_topology.py --gen-dir \\")
+    print("   ../hypatia/paper/satellite_networks_state/gen_data/"
+          "starlink_550_isls_plus_grid_ground_stations_top_100_algorithm_free_one_only_over_isls")
+    print("2. Build + run ns-3:")
     abs_run_dir = os.path.abspath(OUT_DIR)
     print(f"   ./waf --run=\"main_satnet --run_dir='{abs_run_dir}'\"")
-    print("6. Analyse results:")
-    print("   python3 analyse_results.py")
+    print("3. Analyse: python3 analyse_results.py")
 
 
 if __name__ == "__main__":
