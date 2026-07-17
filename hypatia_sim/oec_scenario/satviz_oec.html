@@ -68,23 +68,56 @@
     // Landmass is embedded as Natural Earth 110m polygons (no tile servers:
     // openstreetmap.org blocks file:// pages with "Access blocked" tiles, and
     // remote basemaps break offline). This also matches Hypatia's toner look.
-    var landFill = Cesium.Color.fromCssColorString('#dde3e8');
-    var coastCol = Cesium.Color.fromCssColorString('#9aa4ad');
+    // Synchronous primitives (not entities): entity geometry batches lazily
+    // per frame and is starved by the per-frame link updates below — the
+    // continents could take a minute to appear. asynchronous:false
+    // triangulates once at load and renders on the first frame.
+    var landFill = Cesium.Color.fromCssColorString('#b9c4cc');
+    var coastCol = Cesium.Color.fromCssColorString('#6e7a85');
+    var landInstances = [], coastInstances = [];
     D.land.forEach(function(poly) {
-      viewer.entities.add({ polygon: {
-        hierarchy: new Cesium.PolygonHierarchy(
-          Cesium.Cartesian3.fromDegreesArray(poly.o),
-          poly.h.map(function(hole) {
-            return new Cesium.PolygonHierarchy(
-              Cesium.Cartesian3.fromDegreesArray(hole));
-          })),
-        material: landFill
-      }});
-      viewer.entities.add({ polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArray(poly.o),
-        width: 1, material: coastCol, clampToGround: false
-      }});
+      // Cesium triangulates the Antarctic rings (mainland encloses the pole,
+      // ice shelves hug it) inside-out, tinting the entire ocean — draw
+      // everything south of 60°S as coastline only.
+      var latMin = 90;
+      for (var k = 1; k < poly.o.length; k += 2)
+        if (poly.o[k] < latMin) latMin = poly.o[k];
+      if (latMin > -60) {
+        landInstances.push(new Cesium.GeometryInstance({
+          geometry: new Cesium.PolygonGeometry({
+            polygonHierarchy: new Cesium.PolygonHierarchy(
+              Cesium.Cartesian3.fromDegreesArray(poly.o),
+              poly.h.map(function(hole) {
+                return new Cesium.PolygonHierarchy(
+                  Cesium.Cartesian3.fromDegreesArray(hole));
+              })),
+            vertexFormat: Cesium.PerInstanceColorAppearance.FLAT_VERTEX_FORMAT
+          }),
+          attributes: { color:
+            Cesium.ColorGeometryInstanceAttribute.fromColor(landFill) }
+        }));
+      }
+      coastInstances.push(new Cesium.GeometryInstance({
+        geometry: new Cesium.PolylineGeometry({
+          positions: Cesium.Cartesian3.fromDegreesArray(poly.o),
+          width: 1.0,
+          vertexFormat: Cesium.PolylineColorAppearance.VERTEX_FORMAT
+        }),
+        attributes: { color:
+          Cesium.ColorGeometryInstanceAttribute.fromColor(coastCol) }
+      }));
     });
+    scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: landInstances,
+      appearance: new Cesium.PerInstanceColorAppearance(
+        { flat: true, translucent: false }),
+      asynchronous: false
+    }));
+    scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: coastInstances,
+      appearance: new Cesium.PolylineColorAppearance({ translucent: false }),
+      asynchronous: false
+    }));
     var N = D.nSats, PAIRS = D.islPairs, GS = D.gs, AOIS = D.aois;
 
     // ── Walker propagation (mirrors oec_sim/geometry.py) ─────────────────

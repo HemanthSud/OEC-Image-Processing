@@ -124,9 +124,9 @@ topology state, `summary.txt`, and `plots/*.png`.
 
 ### Visualizations
 
-![OEC scenario on the Cesium globe: Kuiper-630 constellation with LOS-gated ISLs and active MPC task routes (dark red, q=8) at t = 2:13](hypatia_sim/oec_scenario/plots/satviz_oec_screenshot.jpg)
+![OEC scenario on the Cesium globe: Kuiper-630 constellation with LOS-gated ISLs and active MPC task routes (dark red, q=8) at t = 2:38](hypatia_sim/oec_scenario/plots/satviz_oec_screenshot.jpg)
 
-*`satviz_oec.html` at t = 2:13 — 10 active tasks routed to their GBSs (dark
+*`satviz_oec.html` at t = 2:38 — 13 active tasks routed to their GBSs (dark
 red = MPC chose depth 8), 2,312 feasible ISLs, with the legend, scenario/model
 panel, and live MPC stats in the HUD.*
 
