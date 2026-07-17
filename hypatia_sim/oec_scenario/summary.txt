@@ -1,0 +1,36 @@
+==========================================================================
+OEC RQ-NAC Network Simulation — Summary
+==========================================================================
+Constellation   kuiper-630: Walker 1156/34/1  (34 planes x 34 sats)
+Altitude        630 km   inclination 51.9°  orbital period 5830 s
+ISLs            +Grid, 2312 candidate links, LOS-gated (graze > 80 km) + range <= 5016 km
+                feasible on average: 2312/2312 (100.0%)
+GBSs            Tokyo, New-York, Sao-Paulo, Sydney   (min elevation 20.0°)
+Link rates      ISL 100 Mbps, GBS aggregate 2 Mbps
+Simulation      18000 s (5.0 h, 3.1 orbits) at dt = 30 s -> 601 slots
+Depths D        [1, 2, 4, 8]  payload b_q = 88 B, 176 B, 352 B, 704 B
+
+── Contact windows ──────────────────────────────────────────
+  Tokyo       875 windows   avg   259 s   >=1 sat visible 100.0% of slots
+  New-York    1336 windows   avg   227 s   >=1 sat visible 100.0% of slots
+  Sao-Paulo   646 windows   avg   265 s   >=1 sat visible 100.0% of slots
+  Sydney      814 windows   avg   261 s   >=1 sat visible 100.0% of slots
+
+── Task load K ──────────────────────────────────────────────
+  64 tasks, 12,809,971 images total, N_k ~ U(100,000, 300,000)
+  offered load at depth-8: 72.1 Gbit  vs  total GBS capacity 144.0 Gbit  (utilization 0.50)
+  encoder pipeline: 81 img/s per satellite (12.34 ms/img measured)
+
+── Scheduler comparison (maximize images transmitted / utility) ─
+  scheduler                images  delivery%   utility  on-time%
+  mpc                  12,809,971     100.0%     64.11     88.7%
+  greedy-adaptive      12,809,971     100.0%     63.70     88.7%
+  greedy-fixed-1       12,809,971     100.0%     53.83     88.7%
+  greedy-fixed-2       12,809,971     100.0%     58.85     88.7%
+  greedy-fixed-4       12,809,971     100.0%     62.25     88.7%
+  greedy-fixed-8       12,809,971     100.0%     64.15     88.7%
+
+Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,
+tasks.csv, timeline_*.csv, task_outcomes_*.csv, plots/*.png,
+viewer.html (interactive simulator)
+==========================================================================

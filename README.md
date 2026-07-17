@@ -85,11 +85,69 @@ Compute delay is identical across depths — the encoder CNN dominates, not the 
 
 ---
 
-## Satellite Network Simulation
+## Satellite Network Simulation — `hypatia_sim/oec_sim/` (current)
 
-### Small Scenario (current)
+Implements the system model and rolling-horizon MPC of the Overleaf
+formulation (*OEC RQ-NAC*). Every symbol maps 1:1 to code (`config.py`):
 
-A small but complete LEO scenario (`hypatia_sim/small_scenario.py`) — no ns-3 or Hypatia state generation required, runs in under 1 second.
+| Formulation | Implementation |
+|---|---|
+| Satellites S | Kuiper-630 shell 1 — Walker 1156/34/1 (34 planes × 34 sats, 630 km, 51.9°); switchable to `starlink-550` / `telesat-1015` |
+| GBSs G | Tokyo, New York, São Paulo, Sydney (Hypatia top-100 city list); GSL feasible at elevation ≥ 20°, 2 Mbps aggregate per GBS |
+| Links E_t, C_ij(t) | +Grid ISLs gated per 30 s slot by a line-of-sight test (segment must clear Earth + 80 km atmosphere) and 5,016 km max range; 100 Mbps per ISL. All 2,312 Kuiper +Grid links pass — unlike the legacy small scenario's 120°-apart links, whose chords pass ~2,900 km below the surface (the issue Xuanhao flagged) |
+| Tasks K | 8 AOIs (wildfires, Amazon, Sahel, …), imaging at elevation ≥ 40°; 64 tasks / 12.8M images over the window, weights w_k ∈ {1,2,3}, soft deadlines with freshness decay |
+| Depths D = {1,2,4,8} | Utilities u_q = 1 − LPIPS_q **measured** from the FLAIR depth-16 model truncated to q stages: 0.405 / 0.443 / 0.469 / 0.483; payload b_q = 88·q B (8×8 latent); encoder 12.34 ms/image |
+| Routing | Per-slot shortest-delay Dijkstra from each GBS over the feasible graph; routes never relay through another GBS |
+
+Window: 5 h (3.1 orbits) at 30 s slots. Run with `python3 -m oec_sim.run_all`
+(~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
+notation.
+
+### MPC Scheduler vs. Fixed Depths
+
+The scheduler is a deterministic rolling-horizon MPC: HiGHS MILP (via scipy)
+over an H = 60-slot (30 min) horizon, executes the first slot, re-plans on
+task arrivals and at least every 5 slots. Baselines: greedy with each fixed
+depth, and a greedy that adapts depth to queue length.
+
+**Which depth is best depends on load — which is the argument for MPC:**
+
+| Regime | Best fixed depth | MPC |
+|---|---|---|
+| Light load (2 Mbps/GBS, util 0.50) | depth-8 (utility 64.15, 100% delivered) | 64.11, 100% |
+| Congested (1 Mbps/GBS, util 1.00) | depth-4 (62.25, 100%) — depth-8 collapses to 87.3% / 23.78 | **63.21, 100%** (mixes 30×8, 30×4, 4×2) |
+
+MPC matches or beats the best fixed depth in every regime without knowing the
+regime in advance. Outputs land in `hypatia_sim/oec_scenario/`: per-task
+outcomes and per-slot timelines for every scheduler, contact windows,
+topology state, `summary.txt`, and `plots/*.png`.
+
+### Visualizations
+
+Three viewers, all showing the same verified topology (the drawn ISLs, GSLs,
+and routes were checked node-for-node against `topology.py`'s routing):
+
+1. **`oec_scenario/satviz_oec.html`** *(main)* — the OEC scenario on the
+   Cesium 3D globe in Hypatia's SatViz style. Constellation animated over the
+   full 5 h window with a timeline scrubber; per-frame LOS-gated ISLs,
+   elevation-gated GSLs, GBS/AOI markers; active MPC tasks drawn as
+   shortest-delay routes coloured by the chosen depth (green q=1, yellow q=2,
+   orange q=4, dark red q=8); legend, scenario/model panel, and live stats
+   HUD (delivered images, utility, backlog) driven by `timeline_mpc.csv`.
+   Landmass is embedded (Natural Earth 110m, `oec_sim/land_110m.json`) rather
+   than streamed — tile hosts block `file://` pages — so only the Cesium
+   library loads from the network. Regenerate: `python3 -m oec_sim.satviz`.
+2. **`oec_scenario/viewer.html`** — self-contained 2D canvas simulator
+   (play/scrub, ISL/coverage toggles, live stats); fully offline.
+3. **Stock Hypatia SatViz** (`hypatia/satviz`, local clone, not tracked) —
+   `scripts/visualize_kuiper_630.py` writes `viz_output/kuiper_630.html`,
+   the same static snapshot style as Hypatia's README figures (one epoch,
+   intra-plane orbit rings only, no ISL model). Needs a free Cesium ion
+   token pasted at line 10.
+
+### Small Scenario (legacy)
+
+A small but complete LEO scenario (`hypatia_sim/small_scenario.py`) — no ns-3 or Hypatia state generation required, runs in under 1 second. **Superseded by `oec_sim/`:** its 120°-separation intra-plane ISLs are not physically feasible (no line of sight — the direct path passes through the Earth), as noted by Xuanhao; kept for reference only.
 
 **Constellation:** Walker 6/2/1 — 6 satellites, 2 orbital planes of 3, 550 km, 53°, ~95.5 min orbital period.
 
@@ -126,7 +184,18 @@ Outputs: `contact_windows.csv`, `link_availability.csv`, `path_info.csv` — dir
 ```
 .
 ├── hypatia_sim/
-│   ├── small_scenario.py           # Small complete satellite scenario (current)
+│   ├── oec_sim/                    # OEC scenario + MPC scheduler (current)
+│   │   ├── config.py               # All parameters (constellation, links, tasks, depths)
+│   │   ├── geometry.py             # Walker propagation, ISL line-of-sight test
+│   │   ├── topology.py             # E_t: feasibility-gated links, per-slot routing
+│   │   ├── tasks.py                # AOI-triggered task arrivals
+│   │   ├── schedulers.py           # MPC (MILP) + greedy baselines
+│   │   ├── plots.py / viewer.py    # Figures + interactive HTML simulator
+│   │   ├── satviz.py               # OEC scenario on the Cesium globe (Hypatia SatViz style)
+│   │   ├── land_110m.json          # Embedded Natural Earth landmass for satviz
+│   │   └── FORMULATION.md          # Parameters in the Overleaf notation
+│   ├── oec_scenario/               # Simulation outputs (CSVs, plots, viewer.html, satviz_oec.html)
+│   ├── small_scenario.py           # Legacy 6-sat scenario (infeasible ISLs)
 │   ├── topology_config.py          # Full Starlink-550 topology config
 │   ├── generate_sim_inputs.py      # UDP burst schedule + ns-3 config
 │   ├── extract_topology.py         # ISL degree, serving sats, handoffs, windows
@@ -179,18 +248,36 @@ python3 evaluate_truncation.py
 
 ```bash
 cd hypatia_sim
-python3 small_scenario.py
+pip3 install numpy scipy matplotlib   # scipy provides the HiGHS MILP solver
+python3 -m oec_sim.run_all            # ~1 min; outputs in oec_scenario/
+python3 small_scenario.py             # legacy 6-sat scenario
+```
+
+### SatViz (Cesium 3D visualization)
+
+```bash
+# OEC scenario on the Cesium globe (animated, ISLs/GSLs/MPC overlay):
+cd hypatia_sim
+python3 -m oec_sim.satviz             # writes oec_scenario/satviz_oec.html
+
+# stock Hypatia static snapshot:
+cd hypatia/satviz/scripts
+pip3 install ephem
+python3 visualize_kuiper_630.py       # writes ../viz_output/kuiper_630.html
+# paste your Cesium ion token (free, cesium.com/ion) at line 10 of the
+# generated HTML, then open it in a browser
 ```
 
 ---
 
 ## Pending
 
-1. Complete FLAIR-1 sweep for depths 2 and 4
+1. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
 2. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
-3. Evaluate classification accuracy on reconstructed images
+3. Evaluate downstream-task metrics (mIoU / F1) on reconstructed images and replace the 1−LPIPS utility mapping u_q in `oec_sim/config.py`
 4. Run NAC entropy coding on exported FLAIR codes
-5. MPC / rolling-horizon scheduler design for compression depth and transmission timing
+5. ~~MPC / rolling-horizon scheduler~~ — done in `oec_sim/` (deterministic MPC); next: robust/stochastic MPC variants, per-GBS antenna constraints
+6. ~~SatViz 3D visualization~~ — done: `oec_scenario/satviz_oec.html` (animated OEC scenario with MPC overlay, legend, scenario panel)
 
 ---
 

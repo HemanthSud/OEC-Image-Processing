@@ -1,0 +1,8 @@
+Evaluated split: val                                                                                                                                                                                        
+  Model                PSNR(dB)   SSIM       LPIPS      FID                                                                                                                                                   
+  ----------------------------------------------------------------------                                                                                                                                      
+  flair-rqvae-8x8x1    20.63      0.4560     0.4595     71.33
+  flair-rqvae-8x8x8    21.02      0.4643     0.4779     73.19                                                                                                                                                 
+  EOF                                                 
+
+
