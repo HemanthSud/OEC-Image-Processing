@@ -134,6 +134,18 @@ Outputs land in `hypatia_sim/oec_scenario/`: per-task outcomes, per-slot
 timelines, per-scheduler MILP solve-time logs, the HiGHS upper-bound report
 (`--oracle`), `summary.txt`, and `plots/*.png`.
 
+**Delay and violation metrics** (new this pass, in every `task_outcomes_*.csv`
+and in `summary.txt`'s "Delay / depth mix" block): per-task completion delay
+and lateness, `on-time%` (image-weighted — what fraction of *images* beat
+their deadline) and `viol%` (task-weighted — what fraction of *tasks* had
+*any* late images, a stricter, complementary reading of the same run), mean
+and p95 completion delay, the chosen-depth distribution per scheduler, and
+`dropped`/`rejected` counts for schedulers that support giving up on a task.
+`delay_cdf.png` plots the completion-delay distribution across schedulers.
+What's *not* here yet: these measure timeliness, not whether the delivered
+image was actually still useful for its task — see the downstream-metrics
+item in Pending.
+
 ### Offline Optimality Bound (HiGHS)
 
 `oec_sim/oracle.py` computes two valid upper bounds — dropping ISL/GSL rows
