@@ -142,6 +142,23 @@ their deadline) and `viol%` (task-weighted — what fraction of *tasks* had
 and p95 completion delay, the chosen-depth distribution per scheduler, and
 `dropped`/`rejected` counts for schedulers that support giving up on a task.
 `delay_cdf.png` plots the completion-delay distribution across schedulers.
+
+| scheduler | on-time% (image-weighted) | viol% (task-weighted) | mean delay | p95 delay | dropped |
+|---|---|---|---|---|---|
+| mpc | 88.7% | 43.8% | 2,216 s | 3,189 s | 0 |
+| greedy-adaptive | 88.7% | 43.8% | 2,463 s | 3,536 s | 0 |
+| greedy-fixed-2 | 88.7% | 43.8% | 2,453 s | 3,536 s | 0 |
+| greedy-fixed-4 | 88.7% | 43.8% | 2,453 s | 3,536 s | 0 |
+| greedy-fixed-8 | 88.7% | 43.8% | 2,460 s | 3,536 s | 0 |
+| greedy-fixed-16 | 31.3% | 85.9% | 4,275 s | 7,836 s | 0 |
+| mpc-hier | 84.3% | 45.3% | 2,678 s | 3,388 s | 16 |
+
+`greedy-fixed-16` is the clearest illustration of what these metrics are for:
+its per-image on-time rate collapses to 31.3% and p95 delay balloons to
+7,836 s (~2.2 h) — those are the numbers utility alone doesn't show directly.
+`mpc-hier`'s 16 dropped tasks are exactly the "rotting" ones it gave up on
+rather than letting them silently miss every deadline forever.
+
 What's *not* here yet: these measure timeliness, not whether the delivered
 image was actually still useful for its task — see the downstream-metrics
 item in Pending.
