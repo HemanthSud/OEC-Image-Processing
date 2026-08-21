@@ -1,0 +1,5 @@
+# oec_sim core -- topology, tasks, MPC/greedy/hierarchical schedulers,
+# oracle bound, sweep, plots. Python 3.10+ (uses scipy.optimize.milp).
+numpy>=1.24
+scipy>=1.11        # scipy.optimize.milp (HiGHS) requires >=1.9
+matplotlib>=3.7

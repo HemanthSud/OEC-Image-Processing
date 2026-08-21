@@ -30,6 +30,12 @@ class Task:
     delivered: float = 0.0       # images fully delivered r_k
     delivered_utility: float = 0.0
     delivery_slots: dict = field(default_factory=dict)  # slot -> images
+    first_delivery_slot: int = None
+    completion_slot: int = None  # slot at which delivered >= n_images
+    late_images: float = 0.0     # images whose arrival was past deadline_s
+    dropped: bool = False        # explicitly abandoned (rotting-backlog fix)
+    dropped_slot: int = None
+    rejected: bool = False       # admission control refused it at arrival
 
     def encoded_by(self, t_s):
         """Images encoded by absolute time t_s (encode starts at arrival)."""

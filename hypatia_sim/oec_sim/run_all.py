@@ -26,13 +26,16 @@ def _write_csv(path, rows, fields):
     print(f'  wrote {len(rows):6d} rows -> {os.path.relpath(path)}')
 
 
-def run_schedulers(topo):
-    """Run every scheduler on a fresh copy of the task set."""
+def run_schedulers(topo, extra_makers=()):
+    """Run every scheduler on a fresh copy of the task set. extra_makers
+    is a list of (topo, tasks) -> scheduler callables appended to the
+    default set (e.g. mpc-congestion, mpc-hier — see run_all.main())."""
     results = {}
     makers = ([lambda tp, tk: MPCScheduler(tp, tk),
                lambda tp, tk: GreedyScheduler(tp, tk, depth=None)]
               + [lambda tp, tk, q=q: GreedyScheduler(tp, tk, depth=q)
-                 for q in C.DEPTHS])
+                 for q in C.DEPTHS]
+              + list(extra_makers))
     for make in makers:
         tasks = TK.generate_tasks(topo)          # deterministic, fresh state
         sched = make(topo, tasks)
@@ -41,7 +44,8 @@ def run_schedulers(topo):
         print(f'  {sched.name:16s}  {time.time() - t0:6.1f} s  '
               f'delivered {hist["delivered_images"][-1]:12,.0f} images  '
               f'utility {hist["utility"][-1]:8.2f}')
-        results[sched.name] = {'hist': hist, 'tasks': tasks}
+        results[sched.name] = {'hist': hist, 'tasks': tasks,
+                               'solve_log': getattr(sched, 'solve_log', [])}
     return results
 
 
@@ -81,19 +85,42 @@ def write_outputs(topo, results):
     _write_csv(os.path.join(C.OUT_DIR, 'tasks.csv'), rows, list(rows[0].keys()))
 
     for name, res in results.items():
-        rows = [{'kid': k.kid, 'depth': k.depth,
-                 'delivered_images': round(k.delivered, 1),
-                 'delivery_fraction': round(k.delivered / k.n_images, 4),
-                 'utility': round(k.delivered_utility, 4)}
-                for k in res['tasks']]
+        rows = []
+        for k in res['tasks']:
+            completion_s = ((k.completion_slot + 1) * C.SLOT_S
+                            if k.completion_slot is not None else None)
+            rows.append({
+                'kid': k.kid, 'depth': k.depth,
+                'arrival_s': k.arrival_slot * C.SLOT_S,
+                'deadline_s': k.deadline_s,
+                'delivered_images': round(k.delivered, 1),
+                'delivery_fraction': round(k.delivered / k.n_images, 4),
+                'utility': round(k.delivered_utility, 4),
+                'first_delivery_s': ((k.first_delivery_slot + 1) * C.SLOT_S
+                                     if k.first_delivery_slot is not None else None),
+                'completion_s': completion_s,
+                'completion_delay_s': (completion_s - k.arrival_slot * C.SLOT_S
+                                       if completion_s is not None else None),
+                'lateness_s': (completion_s - k.deadline_s
+                               if completion_s is not None else None),
+                'late_image_fraction': round(k.late_images / k.n_images, 4),
+                'deadline_violated': int(
+                    k.dropped or completion_s is None or completion_s > k.deadline_s),
+                'dropped': int(k.dropped),
+                'rejected': int(k.rejected),
+            })
         _write_csv(os.path.join(C.OUT_DIR, f'task_outcomes_{name}.csv'),
                    rows, list(rows[0].keys()))
+        if res.get('solve_log'):
+            _write_csv(os.path.join(C.OUT_DIR, f'solve_log_{name}.csv'),
+                       res['solve_log'], list(res['solve_log'][0].keys()))
         hist = res['hist']
         rows = [{'t_s': hist['t_s'][i],
                  'delivered_images': round(hist['delivered_images'][i], 1),
                  'utility': round(hist['utility'][i], 4),
                  'backlog_bits': round(hist['backlog_bits'][i]),
-                 'n_active': hist['n_active'][i]}
+                 'n_active': hist['n_active'][i],
+                 'n_dropped': hist['n_dropped'][i]}
                 for i in range(len(hist['t_s']))]
         _write_csv(os.path.join(C.OUT_DIR, f'timeline_{name}.csv'),
                    rows, list(rows[0].keys()))
@@ -154,37 +181,99 @@ def build_summary(topo, results):
 
     L.append('── Scheduler comparison (maximize images transmitted / utility) ─')
     L.append(f'  {"scheduler":16s} {"images":>14s} {"delivery%":>10s} '
-             f'{"utility":>9s} {"on-time%":>9s}')
+             f'{"utility":>9s} {"on-time%":>9s} {"viol%":>7s} {"dropped":>8s}')
     for name, res in results.items():
         tk = res['tasks']
         img = sum(k.delivered for k in tk)
         frac = img / tot_img
         ontime = sum(v for k in tk for t, v in k.delivery_slots.items()
                      if (t + 1) * C.SLOT_S <= k.deadline_s)
+        n_viol = sum(1 for k in tk if k.dropped or k.completion_slot is None
+                    or (k.completion_slot + 1) * C.SLOT_S > k.deadline_s)
+        n_dropped = sum(1 for k in tk if k.dropped)
         L.append(f'  {name:16s} {img:14,.0f} {100 * frac:9.1f}% '
-                 f'{res["hist"]["utility"][-1]:9.2f} {100 * ontime / tot_img:8.1f}%')
+                 f'{res["hist"]["utility"][-1]:9.2f} {100 * ontime / tot_img:8.1f}% '
+                 f'{100 * n_viol / len(tk):6.1f}% {n_dropped:8d}')
     L.append('')
+
+    L.append('── Delay / depth mix ────────────────────────────────────────')
+    for name, res in results.items():
+        tk = res['tasks']
+        delays = [k.completion_slot * C.SLOT_S - k.arrival_slot * C.SLOT_S
+                 for k in tk if k.completion_slot is not None]
+        mean_d = np.mean(delays) if delays else float('nan')
+        p95_d = np.percentile(delays, 95) if delays else float('nan')
+        mix = ' '.join(f'{q}:{sum(1 for k in tk if k.depth == q)}' for q in C.DEPTHS)
+        L.append(f'  {name:16s} mean delay {mean_d:7.0f}s  p95 {p95_d:7.0f}s  '
+                 f'depth mix {mix}')
+    L.append('')
+
+    L.append('── MPC solve-time instrumentation ───────────────────────────')
+    for name, res in results.items():
+        log = res.get('solve_log') or []
+        if not log:
+            continue
+        ms = [r['wall_s'] * 1e3 for r in log]
+        L.append(f'  {name:16s} {len(log):4d} solves   '
+                 f'mean {np.mean(ms):7.1f} ms   p95 {np.percentile(ms, 95):7.1f} ms   '
+                 f'max {np.max(ms):7.1f} ms   total {sum(ms) / 1e3:6.1f} s')
+    L.append('')
+
     L.append('Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,')
-    L.append('tasks.csv, timeline_*.csv, task_outcomes_*.csv, plots/*.png,')
-    L.append('viewer.html (interactive simulator)')
+    L.append('tasks.csv, timeline_*.csv, task_outcomes_*.csv, solve_log_*.csv,')
+    L.append('plots/*.png, viewer.html (interactive simulator)')
     L.append('=' * 74)
     return '\n'.join(L)
 
 
-def main():
-    print('Building topology...')
+def main(argv=None):
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--scenario', default=C.SCENARIO,
+                   choices=list(C._SCENARIOS))
+    p.add_argument('--congestion', action='store_true',
+                   help='also run mpc-congestion (predictive routing, '
+                        'Dr. Liu\'s directive) alongside the flat mpc')
+    p.add_argument('--hier', action='store_true',
+                   help='also run mpc-hier (hierarchical MPC)')
+    p.add_argument('--oracle', action='store_true',
+                   help='compute the HiGHS offline upper bound and append '
+                        'the optimality-gap table to summary.txt')
+    args = p.parse_args(argv)
+    C.apply_scenario(args.scenario)
+
+    print(f'Building topology... (scenario={args.scenario})')
     t0 = time.time()
     topo = T.build_topology()
     print(f'  done in {time.time() - t0:.1f} s '
           f'({C.N_SATS} sats, {len(topo.isl_pairs)} ISLs, {C.N_SLOTS} slots)')
 
+    extra_makers = []
+    if args.congestion:
+        extra_makers.append(lambda tp, tk: MPCScheduler(tp, tk, route_mode='predictive'))
+    if args.hier:
+        from .hier import HierarchicalMPCScheduler
+        extra_makers.append(lambda tp, tk: HierarchicalMPCScheduler(tp, tk))
+
     print('Running schedulers...')
-    results = run_schedulers(topo)
+    results = run_schedulers(topo, extra_makers=extra_makers)
+
+    oracle_txt = None
+    if args.oracle:
+        from . import oracle as OR
+        any_tasks = next(iter(results.values()))['tasks']
+        print('Solving oracle upper bound...')
+        oracle_txt = OR.report(topo, any_tasks, results)
+        with open(os.path.join(C.OUT_DIR, 'upper_bound.txt'), 'w') as f:
+            f.write(oracle_txt)
+        print(oracle_txt)
 
     print('Writing outputs...')
     write_outputs(topo, results)
 
     summary = build_summary(topo, results)
+    if oracle_txt:
+        summary += '\n\n' + oracle_txt
     with open(os.path.join(C.OUT_DIR, 'summary.txt'), 'w') as f:
         f.write(summary)
     print()

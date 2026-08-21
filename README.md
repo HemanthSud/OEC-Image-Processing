@@ -96,31 +96,159 @@ formulation (*OEC RQ-NAC*). Every symbol maps 1:1 to code (`config.py`):
 | GBSs G | Tokyo, New York, São Paulo, Sydney (Hypatia top-100 city list); GSL feasible at elevation ≥ 20°, 2 Mbps aggregate per GBS |
 | Links E_t, C_ij(t) | +Grid ISLs gated per 30 s slot by a line-of-sight test (segment must clear Earth + 80 km atmosphere) and 5,016 km max range; 100 Mbps per ISL. All 2,312 Kuiper +Grid links pass — unlike the legacy small scenario's 120°-apart links, whose chords pass ~2,900 km below the surface (the issue Xuanhao flagged) |
 | Tasks K | 8 AOIs (wildfires, Amazon, Sahel, …), imaging at elevation ≥ 40°; 64 tasks / 12.8M images over the window, weights w_k ∈ {1,2,3}, soft deadlines with freshness decay |
-| Depths D = {1,2,4,8} | Utilities u_q = 1 − LPIPS_q **measured** from the FLAIR depth-16 model truncated to q stages: 0.405 / 0.443 / 0.469 / 0.483; payload b_q = 88·q B (8×8 latent); encoder 12.34 ms/image |
-| Routing | Per-slot shortest-delay Dijkstra from each GBS over the feasible graph; routes never relay through another GBS |
+| Depths D = {2,4,8,16} | Utilities u_q = 1 − LPIPS_q **measured** from the FLAIR depth-16 model truncated to q stages: 0.443 / 0.469 / 0.483 / 0.496; payload b_q = 88·q B (8×8 latent); encoder 12.34 ms/image |
+| Routing | Static: per-slot shortest-delay Dijkstra from each GBS. Predictive (`route_mode='predictive'`, `oec_sim/routing.py`): MPC predicts per-edge congestion from its own plan, Dijkstra re-solves per horizon step, iterated to a damped fixed point (Dr. Liu's directive) |
 
 Window: 5 h (3.1 orbits) at 30 s slots. Run with `python3 -m oec_sim.run_all`
-(~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
+(~25 s; add `--hier --oracle` for the hierarchical scheduler and HiGHS bound,
+~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
 notation.
 
-### MPC Scheduler vs. Fixed Depths
+### MPC Scheduler vs. Fixed Depths vs. Hierarchical MPC
 
-The scheduler is a deterministic rolling-horizon MPC: HiGHS MILP (via scipy)
-over an H = 60-slot (30 min) horizon, executes the first slot, re-plans on
-task arrivals and at least every 5 slots. Baselines: greedy with each fixed
-depth, and a greedy that adapts depth to queue length.
+The flat scheduler is a deterministic rolling-horizon MPC: HiGHS MILP (via
+scipy) over an H = 60-slot (30 min) horizon, executes the first slot,
+re-plans on task arrivals and at least every 5 slots — with a timeliness
+objective (route-delay-aware freshness + an explicit tardiness penalty, not
+just the freshness discount) and an O(H) encoder-pipeline constraint (was
+O(H²), a 3-10× MILP speedup). Baselines: greedy with each fixed depth, a
+greedy that adapts depth to queue length, and a two-level hierarchical MPC
+(`mpc-hier`) that separates slow admission/drop/budget decisions from a fast
+per-task depth MILP — see `oec_sim/FORMULATION.md` for the full math.
 
-**Which depth is best depends on load — which is the argument for MPC:**
+**Which fixed depth is best depends on load; MPC tracks the upper envelope
+without knowing the regime in advance — and is within 0.4% of the offline
+HiGHS optimum:**
 
-| Regime | Best fixed depth | MPC |
+| scheduler | utility (D={2,4,8,16}, GBS-limited, util≈1.00) | gap to HiGHS bound |
 |---|---|---|
-| Light load (2 Mbps/GBS, util 0.50) | depth-8 (utility 64.15, 100% delivered) | 64.11, 100% |
-| Congested (1 Mbps/GBS, util 1.00) | depth-4 (62.25, 100%) — depth-8 collapses to 87.3% / 23.78 | **63.21, 100%** (mixes 30×8, 30×4, 4×2) |
+| mpc | **64.95**, 95.4% delivered | 0.4% |
+| greedy-fixed-8 | 64.15, 100% delivered | 1.6% |
+| greedy-adaptive | 64.12, 100% delivered | 1.7% |
+| greedy-fixed-4 | 62.25, 100% delivered | 4.5% |
+| mpc-hier | 61.4, 95.1% delivered (16 tasks explicitly dropped, not silently starved) | 5.9%, but 4.3× faster to solve |
+| greedy-fixed-2 | 58.85, 100% delivered | 9.8% |
+| greedy-fixed-16 | 24.43, 87.3% delivered | 62.5% |
 
-MPC matches or beats the best fixed depth in every regime without knowing the
-regime in advance. Outputs land in `hypatia_sim/oec_scenario/`: per-task
-outcomes and per-slot timelines for every scheduler, contact windows,
-topology state, `summary.txt`, and `plots/*.png`.
+Outputs land in `hypatia_sim/oec_scenario/`: per-task outcomes, per-slot
+timelines, per-scheduler MILP solve-time logs, the HiGHS upper-bound report
+(`--oracle`), `summary.txt`, and `plots/*.png`.
+
+### Offline Optimality Bound (HiGHS)
+
+`oec_sim/oracle.py` computes two valid upper bounds — dropping ISL/GSL rows
+and keeping only the per-window GBS-aggregate budget, which is always a
+*relaxation* (it never binds tighter than the true feasible region, since
+those rows never bind in the real schedule either — see below):
+
+| bound | value | method |
+|---|---|---|
+| analytic ceiling | 69.95 | every image at best depth, delivered instantly (sanity check only) |
+| LP bound | 65.66 | depth relaxed to continuous, 5-slot windows |
+| MILP bound (dual) | 65.22 | full resolution, integral depth, HiGHS, 120 s time limit, 0.1% MIP gap |
+
+**MPC lands at 64.95 — 0.4% off the true optimum.** That's the single
+strongest number from this pass: the flat MPC isn't "pretty good," it's
+essentially solving the problem optimally in this regime.
+
+### Predicted-Cost Routing (Dr. Liu's directive)
+
+*"MPC and Dijkstra are not necessarily mutually exclusive — have MPC
+predict link costs, and Dijkstra compute the path at each predicted step."*
+Implemented in `oec_sim/routing.py`: an M/M/1-style congestion penalty on
+top of propagation distance, built from the MPC's own predicted load, with
+Dijkstra re-solved per horizon step and iterated to a damped fixed point
+(`route_mode='predictive'`, scheduler name `mpc-congestion`).
+
+**Verified no-op under the committed `gbs-limited` rates** — an audit found
+the per-GBS aggregate budget is ≥12× tighter than any ISL segment a route
+could cross, so ISL contention is mathematically unreachable (max measured
+ISL utilization ≈0.08) and predicted-cost routing has nothing to act on
+(`route_mode='predictive'` reproduces `route_mode='static'` bit-for-bit at
+iteration 0). A second scenario, `SCENARIO='fabric-limited'` (`--scenario
+fabric-limited --congestion`), rebalances rates so ISL segments can
+genuinely saturate; there, predictive routing measurably changes the plan
+and utility. Only single-path routing is implemented — multipath candidate
+sets are documented future work.
+
+### Hierarchical MPC + the Rotting-Backlog Fix
+
+*"Hierarchical MPC — one MPC to select the best path, another one [for the
+rest]."* `oec_sim/hier.py` splits the problem into a slow upper level
+(admission control, explicit task abandonment, per-task GBS-budget
+allocation, every 10 min) and a fast lower level (today's per-task depth
+MILP, but short-horizon and budget-capped, every 5 slots). This also gives
+the rotting-backlog problem — a task whose freshness has decayed to ~0
+still holds backlog and still generates MILP variables every re-plan, but
+is never worth serving, so under the flat scheduler it silently starves
+forever — an explicit, reported fix: tasks are either admitted, dropped
+(counted), or rejected at arrival (counted), never silently abandoned.
+
+Measured trade-off (see table above): `mpc-hier` gives up ~3.6 utility
+points relative to flat MPC (5.9% vs 0.4% gap to the HiGHS bound) in
+exchange for **4.3× faster solving** (3.7 s vs 15.8 s total solve time
+across the run) and honest accounting of the 16 tasks it explicitly drops.
+A small grid search (5 combinations) tuned `PHI_DROP` (0.05→0.01) and
+`HIER_THETA_ADMIT` (0.9→0.5), closing about a point of the gap (60.71→61.4
+utility) — a first pass, not exhaustive.
+
+### Committed Congestion Sweep
+
+![Utility vs. GBS downlink rate: MPC and the hierarchical MPC track the upper envelope across load regimes, while the best fixed depth crosses over between them](hypatia_sim/oec_scenario/plots/sweep_utility_vs_load.png)
+
+`oec_sim/sweep.py` replaces what used to be a single manual congested run
+that was never saved to the repo. Full grid — 6 GBS rates × 5 seeds × 6
+schedulers, **180 rows**, committed at `oec_scenario/sweep/results.csv`:
+
+| GBS rate | best fixed depth | best-fixed utility | mpc utility |
+|---|---|---|---|
+| 0.75 Mbps | depth-2 | 57.08 | **60.34** |
+| 1.0 Mbps | depth-4 | 60.38 | **61.18** |
+| 1.5 Mbps | depth-4 | 60.38 | **62.34** |
+| 2.0 Mbps | depth-8 | 62.22 | **62.96** |
+| 3.0 Mbps | depth-8 | 62.22 | **63.61** |
+| 4.0 Mbps | depth-16 | 63.92 | 63.76 |
+
+The best *fixed* depth climbs 2→4→8→16 as load falls; `mpc` beats it in 5
+of 6 regimes and is statistically tied (within 0.2 utility) at the one
+point where there's no scarcity to exploit. No cherry-picking — this is the
+mean over all 5 seeds per rate.
+
+### RL Baseline (PPO) — Trained and Evaluated
+
+Dr. Liu asked for an MPC-vs-RL comparison. `oec_sim/rl_env.py` implements a
+Gymnasium environment (`Discrete(6)`: commit one of 4 depths, defer, or
+drop, decided per active task rather than per slot so the action space is
+independent of how many tasks are active or how large the constellation
+is). Reward matches the MILP objective plus potential-based backlog
+shaping.
+
+**A real bug turned up during this pass and is worth stating plainly**: the
+environment had a genuine infinite loop — a task the policy deferred would
+get re-offered at the *same simulated time slot* forever instead of moving
+on to the next slot, because the "rebuild this slot's queue" check used
+empty-list truthiness, which can't tell "just drained, waiting to advance"
+apart from "not built yet." A diagnostic run caught it directly: 3,000
+consecutive decisions with the simulation clock frozen at slot 420 of 601.
+Fixed with an explicit `None` sentinel (`rl_env.py::_advance_to_next_decision`);
+a full episode now runs in ~0.2 s instead of hanging indefinitely.
+
+With that fixed, PPO was **trained** (300k timesteps, load regimes 1.5–2.5
+Mbps × 10 seeds, ~4 min on a CPU Mac) and **evaluated** in-distribution and
+out-of-distribution:
+
+| regime | RL utility | RL delivered% | RL µs/decision | MPC utility | MPC µs/decision |
+|---|---|---|---|---|---|
+| in-dist (2.0 Mbps) | 58.13 / 52.31 | 100% | ~500–1,400 | 61.58 / 55.55 | ~145,000–243,000 |
+| OOD-light (4.0 Mbps) | 58.13 / 52.31 | 100% | ~500–1,400 | 62.44 / 56.14 | ~145,000–243,000 |
+| OOD-heavy (0.75 Mbps) | 54.76 / 50.83 | 100% | ~500–700 | 58.92 / 53.27 | ~163,000–173,000 |
+| *(two seeds shown per regime: 100 / 101)* | | | | | |
+
+Three findings — two matched what I predicted in advance, one didn't:
+
+1. **PPO loses to MPC on utility, as expected** — 5–8% below MPC everywhere tested.
+2. **PPO is ~250–400× faster per decision** (µs vs. hundreds of ms) — the inference-cost story holds up strongly.
+3. **Unexpected**: the observation vector has no capacity/congestion feature (task properties + active-count + mean freshness only), so the policy's *actions* are provably rate-independent — utility is bit-for-bit identical between 2.0 and 4.0 Mbps at a fixed seed. It still delivers 100% of images at 0.75 Mbps (where `greedy-fixed-8` collapses to 13–20 utility) purely because it happened to learn conservative depth choices, not because it senses congestion. That's accidental robustness, not adaptive — the clear next step is adding residual-bandwidth features to the observation, which the original design called for but the shipped version dropped for a smaller vector.
 
 ### Visualizations
 
@@ -128,7 +256,10 @@ topology state, `summary.txt`, and `plots/*.png`.
 
 *`satviz_oec.html` at t = 2:38 — 13 active tasks routed to their GBSs (dark
 red = MPC chose depth 8), 2,312 feasible ISLs, with the legend, scenario/model
-panel, and live MPC stats in the HUD.*
+panel, and live MPC stats in the HUD. Screenshot predates this pass's switch
+to D={2,4,8,16} (taken under the older {1,2,4,8} depth set); regenerate with
+`python3 -m oec_sim.satviz` after a fresh `run_all` to match current depths
+(yellow q=2, orange q=4, red q=8, purple q=16).*
 
 Three viewers, all showing the same verified topology (the drawn ISLs, GSLs,
 and routes were checked node-for-node against `topology.py`'s routing):
@@ -151,37 +282,14 @@ and routes were checked node-for-node against `topology.py`'s routing):
    intra-plane orbit rings only, no ISL model). Needs a free Cesium ion
    token pasted at line 10.
 
-### Small Scenario (legacy)
+### Small Scenario (legacy, superseded)
 
-A small but complete LEO scenario (`hypatia_sim/small_scenario.py`) — no ns-3 or Hypatia state generation required, runs in under 1 second. **Superseded by `oec_sim/`:** its 120°-separation intra-plane ISLs are not physically feasible (no line of sight — the direct path passes through the Earth), as noted by Xuanhao; kept for reference only.
-
-**Constellation:** Walker 6/2/1 — 6 satellites, 2 orbital planes of 3, 550 km, 53°, ~95.5 min orbital period.
-
-**ISLs (9 total):** Intra-plane rings 0↔1↔2↔0 and 3↔4↔5↔3, inter-plane nearest-neighbour 0↔3, 1↔4, 2↔5.
-
-**Ground stations:** Tokyo (node 6) and Sao Paulo (node 7), from the Hypatia top-100 city list.
-
-**Simulation window:** 6,000 s at 10 s steps, minimum elevation 10°.
-
-#### Contact Windows
-
-| Station | Windows | Coverage | Avg window | Serving sats | Handoffs |
-|---|---|---|---|---|---|
-| Tokyo | 4 | 1,390 s (23.2%) | 348 s | 1→0→2→1 | 3 |
-| Sao Paulo | 3 | 1,010 s (16.8%) | 337 s | 2→1→0 | 2 |
-
-#### End-to-End Paths (from imaging sat 0)
-
-| Station | Reachable | Avg delay | Min | Max | Avg hops | Paths |
-|---|---|---|---|---|---|---|
-| Tokyo | 23.8% of steps | 30.11 ms | 1.86 ms | 45.98 ms | 1.66 | 0→6, 0→1→6, 0→2→6 |
-| Sao Paulo | 17.3% of steps | 26.04 ms | 2.38 ms | 46.03 ms | 1.54 | 0→7, 0→1→7, 0→2→7 |
-
-#### ISL Distance Variation
-
-Intra-plane ISLs are constant at 11,988 km. Inter-plane ISLs (0↔3, 1↔4, 2↔5) vary from 7,214 to 13,200 km (±2,100 km std dev) as the planes drift — the primary source of time-varying link availability.
-
-Outputs: `contact_windows.csv`, `link_availability.csv`, `path_info.csv` — direct inputs to a future MPC scheduler.
+`hypatia_sim/small_scenario.py` — an earlier 6-satellite debug scenario,
+fully replaced by `oec_sim/`. Its 120°-separation intra-plane ISLs are not
+physically feasible (no line of sight — the direct path passes through the
+Earth), which is exactly the issue `oec_sim`'s LOS+range gating was built
+to fix. Kept in the repo for reference only; not part of the active
+results.
 
 ---
 
@@ -193,14 +301,22 @@ Outputs: `contact_windows.csv`, `link_availability.csv`, `path_info.csv` — dir
 │   ├── oec_sim/                    # OEC scenario + MPC scheduler (current)
 │   │   ├── config.py               # All parameters (constellation, links, tasks, depths)
 │   │   ├── geometry.py             # Walker propagation, ISL line-of-sight test
-│   │   ├── topology.py             # E_t: feasibility-gated links, per-slot routing
-│   │   ├── tasks.py                # AOI-triggered task arrivals
-│   │   ├── schedulers.py           # MPC (MILP) + greedy baselines
+│   │   ├── topology.py             # E_t: feasibility-gated links, static geometric routing
+│   │   ├── routing.py              # MPC-predicted link costs + per-tau Dijkstra fixed point
+│   │   ├── tasks.py                # AOI-triggered task arrivals, drop/reject tracking
+│   │   ├── schedulers.py           # MPC (MILP) + greedy baselines; O(H) constraint; timeliness objective
+│   │   ├── hier.py                 # Hierarchical MPC (mpc-hier) + rotting-backlog fix
+│   │   ├── oracle.py               # Offline HiGHS upper bound (LP + time-limited MILP)
+│   │   ├── sweep.py                # Committed congestion sweep across load regimes x seeds
+│   │   ├── rl_env.py / rl_train.py # Gymnasium env + PPO baseline (needs a separate RL venv)
 │   │   ├── plots.py / viewer.py    # Figures + interactive HTML simulator
 │   │   ├── satviz.py               # OEC scenario on the Cesium globe (Hypatia SatViz style)
 │   │   ├── land_110m.json          # Embedded Natural Earth landmass for satviz
 │   │   └── FORMULATION.md          # Parameters in the Overleaf notation
 │   ├── oec_scenario/               # Simulation outputs (CSVs, plots, viewer.html, satviz_oec.html)
+│   ├── ppo_oec.zip                 # Trained PPO baseline (MaskablePPO, 300k timesteps)
+│   ├── requirements.txt            # Core sim deps (numpy, scipy, matplotlib)
+│   ├── requirements-rl.txt         # + RL training deps (gymnasium, sb3-contrib, torch)
 │   ├── small_scenario.py           # Legacy 6-sat scenario (infeasible ISLs)
 │   ├── topology_config.py          # Full Starlink-550 topology config
 │   ├── generate_sim_inputs.py      # UDP burst schedule + ns-3 config
@@ -254,8 +370,10 @@ python3 evaluate_truncation.py
 
 ```bash
 cd hypatia_sim
-pip3 install numpy scipy matplotlib   # scipy provides the HiGHS MILP solver
-python3 -m oec_sim.run_all            # ~1 min; outputs in oec_scenario/
+pip3 install -r requirements.txt      # numpy, scipy (HiGHS MILP), matplotlib
+python3 -m oec_sim.run_all                    # ~25 s; outputs in oec_scenario/
+python3 -m oec_sim.run_all --hier --oracle    # + hierarchical MPC + HiGHS bound, ~1 min
+python3 -m oec_sim.sweep --quick              # committed congestion sweep, smoke test
 python3 small_scenario.py             # legacy 6-sat scenario
 ```
 
@@ -278,12 +396,20 @@ python3 visualize_kuiper_630.py       # writes ../viz_output/kuiper_630.html
 
 ## Pending
 
-1. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
-2. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
-3. Evaluate downstream-task metrics (mIoU / F1) on reconstructed images and replace the 1−LPIPS utility mapping u_q in `oec_sim/config.py`
-4. Run NAC entropy coding on exported FLAIR codes
-5. ~~MPC / rolling-horizon scheduler~~ — done in `oec_sim/` (deterministic MPC); next: robust/stochastic MPC variants, per-GBS antenna constraints
-6. ~~SatViz 3D visualization~~ — done: `oec_scenario/satviz_oec.html` (animated OEC scenario with MPC overlay, legend, scenario panel)
+**OEC network simulation:**
+
+1. Add residual-bandwidth/congestion features to the PPO observation (`rl_env.py::_obs()`) — the trained policy's actions are currently rate-independent (see RL section above), which is the main lever left to close its 5–8% utility gap to MPC
+2. `mpc-hier`'s admission/drop/backpressure thresholds were tuned once (`HIER_THETA_ADMIT` 0.9→0.5, `PHI_DROP` 0.05→0.01, closing ~1 utility point) but not exhaustively — still trades ~5.9% utility for 3.7× faster solves
+3. `satviz.py` route replay (`routes_mpc.csv`) so the Cesium viewer's client-side Dijkstra matches predictive/hierarchical routing instead of only the static router
+4. Robust/stochastic MPC variants (forecast uncertainty), per-GBS antenna constraints
+5. Train PPO on the full protocol (100 seeds, `starlink-550` OOD-topology transfer) on the NCSU server — this pass used a reduced local run (30 training seeds, 2 eval seeds/regime) to fit a CPU laptop
+
+**RQ-VAE compression:**
+
+6. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
+7. Evaluate downstream-task metrics (mIoU / F1) on reconstructed images and replace the reconstruction-based utility mapping u_q in `oec_sim/config.py` — still the biggest lever on how much the depth choice can matter, since u_q currently spans only +12% (q=2→16) against an 8× payload spread
+8. Run NAC entropy coding on exported FLAIR codes
+9. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
 
 ---
 

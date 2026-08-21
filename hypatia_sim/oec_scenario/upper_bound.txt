@@ -1,0 +1,18 @@
+==========================================================================
+Offline HiGHS upper bound (routing-relaxed: only the per-window GBS aggregate
+budget is enforced; ISL/GSL rows dropped -- valid because they never bind at
+the committed rates, and dropping rows can only raise the bound further)
+==========================================================================
+analytic ceiling (everything at best depth, instantly):    69.95
+LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.3s, status=0)
+MILP bound (integral depth, full resolution, time_limit=120s): incumbent    65.15  dual    65.22  mip_gap=0.001   (25.9s, status=0)
+
+scheduler          utility  gap to bound
+  mpc                  64.95          0.4%
+  greedy-adaptive      64.12          1.7%
+  greedy-fixed-2       58.85          9.8%
+  greedy-fixed-4       62.25          4.5%
+  greedy-fixed-8       64.15          1.6%
+  greedy-fixed-16      24.43         62.5%
+  mpc-hier             61.40          5.9%
+==========================================================================

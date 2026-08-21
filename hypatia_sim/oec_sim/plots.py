@@ -16,6 +16,10 @@ from . import config as C
 # fixed categorical assignment (entity -> hue, never cycled)
 SCHED_COLOR = {
     'mpc':             '#2a78d6',
+    'mpc-congestion':  '#0b3d91',
+    'mpc-hier':        '#8a4fbf',
+    'mpc-oracle':      '#1a1a19',
+    'ppo':             '#c77b1a',
     'greedy-adaptive': '#1baf7a',
     'greedy-fixed-1':  '#eda100',
     'greedy-fixed-2':  '#008300',
@@ -183,4 +187,25 @@ def make_all(topo, results):
     fig.savefig(os.path.join(out, 'results_comparison.png'), dpi=150)
     plt.close(fig)
 
-    print(f'  wrote 5 figures -> {os.path.relpath(out)}/')
+    # 6 — completion-delay CDF per scheduler (timeliness: Xuanhao's ask)
+    fig, ax = plt.subplots(figsize=(7, 4))
+    for name, res in results.items():
+        col = SCHED_COLOR.get(name, '#6f6e66')
+        delays = sorted(k.completion_slot * C.SLOT_S - k.arrival_slot * C.SLOT_S
+                        for k in res['tasks'] if k.completion_slot is not None)
+        if not delays:
+            continue
+        yy = np.arange(1, len(delays) + 1) / len(res['tasks'])
+        lw = 2.4 if name == 'mpc' else 1.6
+        ax.step(np.array(delays) / 60, yy, where='post', color=col, lw=lw,
+               label=name)
+    ax.set_xlabel('completion delay (min)')
+    ax.set_ylabel('fraction of tasks completed')
+    ax.set_title('Task completion-delay CDF (unfinished tasks excluded)',
+                 fontsize=10)
+    ax.grid(**GRID); ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, 'delay_cdf.png'), dpi=150)
+    plt.close(fig)
+
+    print(f'  wrote 6 figures -> {os.path.relpath(out)}/')

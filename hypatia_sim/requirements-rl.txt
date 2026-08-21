@@ -1,0 +1,11 @@
+# oec_sim.rl_train / rl_env PPO baseline -- install in a SEPARATE venv on
+# Python 3.11 or 3.12 (this repo's default Python, 3.14, is too new for
+# some of these wheels as of 2026-08). Meant to run on the NCSU server.
+#     python3.11 -m venv hypatia_sim/.venv-rl
+#     source hypatia_sim/.venv-rl/bin/activate
+#     pip install -r requirements.txt -r requirements-rl.txt
+-r requirements.txt
+gymnasium>=1.0
+stable-baselines3>=2.4
+sb3-contrib>=2.4    # MaskablePPO (action masking for the depth/defer/drop env)
+torch>=2.2
