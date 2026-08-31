@@ -18,27 +18,46 @@ import numpy as np
 
 from . import config as C
 from . import topology as T
+from . import utility
 from . import tasks as TK
 from .schedulers import GreedyScheduler, MPCScheduler
 
 RATES_MBPS = [0.75, 1.0, 1.5, 2.0, 3.0, 4.0]
 SEEDS = [42, 43, 44, 45, 46]
 
+# Routing only has leverage where the FABRIC is scarce. Under gbs-limited the
+# per-GBS aggregate budget is >=12x tighter than any ISL a route could cross,
+# so ISL contention is mathematically unreachable and every routing variant
+# reproduces the static one bit-for-bit -- we verified exactly that. The
+# coupling grid therefore sweeps the ISL rate under fabric-limited instead.
+ISL_RATES_MBPS = [0.5, 0.75, 1.0, 1.5, 2.0]
+COUPLING_SEEDS = [42, 43, 44]
+
 OUT_DIR = os.path.join(C.OUT_DIR, 'sweep')
 
 
-def _row(rate_mbps, seed, sched, tasks, hist, tot_img, wall_s):
+def _row(rate_mbps, seed, sched, tasks, hist, tot_img, wall_s, obj=None,
+         rate_key='gs_rate_mbps'):
     img = sum(k.delivered for k in tasks)
     n_viol = sum(1 for k in tasks if k.dropped or k.completion_slot is None
                 or (k.completion_slot + 1) * C.SLOT_S > k.deadline_s)
-    return dict(
-        gs_rate_mbps=rate_mbps, seed=seed, scheduler=sched,
-        images_delivered=round(img, 1), delivery_frac=round(img / tot_img, 4),
-        utility=round(hist['utility'][-1], 4),
-        n_dropped=sum(1 for k in tasks if k.dropped),
-        violation_frac=round(n_viol / len(tasks), 4),
-        wall_s=round(wall_s, 2),
-    )
+    total, terms, jain, umin = utility.run_utility(tasks)
+    solve_s = sum(x['wall_s'] for x in getattr(obj, 'solve_log', []) or [])
+    return {
+        rate_key: rate_mbps, 'seed': seed, 'scheduler': sched,
+        'images_delivered': round(img, 1),
+        'delivery_frac': round(img / tot_img, 4),
+        'utility': round(hist['utility'][-1], 4),
+        'utility_quality': round(terms['quality'], 4),
+        'utility_tardy': round(terms['tardiness'], 4),
+        'utility_cost': round(terms['cost'], 4),
+        'u_min': round(umin, 4), 'jain': round(jain, 4),
+        'n_dropped': sum(1 for k in tasks if k.dropped),
+        'violation_frac': round(n_viol / len(tasks), 4),
+        'n_route_fallbacks': getattr(obj, 'n_route_fallbacks', 0),
+        'solve_wall_s': round(solve_s, 2),
+        'wall_s': round(wall_s, 2),
+    }
 
 
 def run(rates_mbps=RATES_MBPS, seeds=SEEDS, include_hier=False, quick=False):
@@ -72,22 +91,28 @@ def run(rates_mbps=RATES_MBPS, seeds=SEEDS, include_hier=False, quick=False):
                         t0 = time.time()
                         hist = sched.run()
                         wall_s = time.time() - t0
-                        rows.append(_row(rate, seed, name, tk, hist, tot_img, wall_s))
+                        rows.append(_row(rate, seed, name, tk, hist,
+                                         tot_img, wall_s, obj=sched))
                         print(f'  rate={rate:4.2f}Mbps seed={seed:3d} '
                              f'{name:16s} util={hist["utility"][-1]:7.2f} '
-                             f'({wall_s:5.1f}s)')
+                             f'({wall_s:5.1f}s)', flush=True)
 
-    path = os.path.join(OUT_DIR, 'results.csv')
+    # --quick is a 2x2 smoke test, not a result. Writing it to results.csv
+    # silently replaces the committed 180-row grid with 24 rows, which is
+    # exactly the kind of loss you only notice much later.
+    path = os.path.join(OUT_DIR,
+                        'results_quick.csv' if quick else 'results.csv')
     with open(path, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
     print(f'wrote {len(rows)} rows -> {os.path.relpath(path)}')
 
-    try:
-        _plot(rows)
-    except ImportError:
-        print('matplotlib not available, skipping sweep plot')
+    if not quick:
+        try:
+            _plot(rows)
+        except ImportError:
+            print('matplotlib not available, skipping sweep plot')
     return rows
 
 
@@ -126,10 +151,69 @@ def _plot(rows):
     print(f'wrote {os.path.relpath(out)}')
 
 
+def run_couplings(isl_rates_mbps=ISL_RATES_MBPS, seeds=COUPLING_SEEDS,
+                  quick=False):
+    """Coupling grid, run under `fabric-limited` where routing can matter.
+
+    Deliberately smaller than the utility grid: mpc-2level re-solves a routing
+    LP on every re-plan, so a 6x5 grid of it would run for many hours.
+    """
+    from .hier import HierarchicalMPCScheduler, HierRouteMPCScheduler
+    from .twolevel import TwoLevelMPCScheduler
+    if quick:
+        isl_rates_mbps, seeds = isl_rates_mbps[:2], seeds[:1]
+    os.makedirs(OUT_DIR, exist_ok=True)
+    rows = []
+    out_name = 'results_routing_quick.csv' if quick else 'results_routing.csv'
+    with C.config_override(scenario='fabric-limited'):
+        topo = T.build_topology()
+        for rate in isl_rates_mbps:
+            with C.config_override(ISL_RATE_BPS=rate * 1e6):
+                for seed in seeds:
+                    with C.config_override(RNG_SEED=seed):
+                        makers = [
+                            ('mpc', lambda tp, tk: MPCScheduler(tp, tk)),
+                            ('mpc-2level',
+                             lambda tp, tk: TwoLevelMPCScheduler(tp, tk)),
+                            ('mpc-hier',
+                             lambda tp, tk: HierarchicalMPCScheduler(tp, tk)),
+                            ('mpc-hier-route',
+                             lambda tp, tk: HierRouteMPCScheduler(tp, tk)),
+                        ]
+                        for name, make in makers:
+                            tk = TK.generate_tasks(topo)
+                            tot_img = sum(k.n_images for k in tk)
+                            sched = make(topo, tk)
+                            t0 = time.time()
+                            hist = sched.run()
+                            rows.append(_row(rate, seed, name, tk, hist,
+                                             tot_img, time.time() - t0,
+                                             obj=sched,
+                                             rate_key='isl_rate_mbps'))
+                            print(f'  isl={rate:4.2f}Mbps seed={seed:3d} '
+                                  f'{name:16s} util={hist["utility"][-1]:7.2f} '
+                                  f'({time.time() - t0:5.1f}s)', flush=True)
+    path = os.path.join(OUT_DIR, out_name)
+    with open(path, 'w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader(); w.writerows(rows)
+    print(f'wrote {len(rows)} rows -> {os.path.relpath(path)}')
+    return rows
+
+
 if __name__ == '__main__':
     import argparse
-    p = argparse.ArgumentParser()
-    p.add_argument('--quick', action='store_true')
-    p.add_argument('--hier', action='store_true')
-    args = p.parse_args()
-    run(include_hier=args.hier, quick=args.quick)
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--quick', action='store_true')
+    ap.add_argument('--hier', action='store_true')
+    ap.add_argument('--couplings', action='store_true',
+                    help='run the routing-coupling grid (ISL rates under '
+                         'fabric-limited) instead of the GBS-rate grid')
+    ap.add_argument('--utility', default=C.UTIL_MODE,
+                    choices=('legacy', 'unified'))
+    args = ap.parse_args()
+    C.apply_utility_mode(args.utility)
+    if args.couplings:
+        run_couplings(quick=args.quick)
+    else:
+        run(include_hier=args.hier, quick=args.quick)

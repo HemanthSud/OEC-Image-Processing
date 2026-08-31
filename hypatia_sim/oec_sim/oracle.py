@@ -29,6 +29,7 @@ from scipy.optimize import milp, LinearConstraint, Bounds
 from scipy.sparse import csr_matrix
 
 from . import config as C
+from . import utility
 
 
 def _windows(H_total, agg):
@@ -55,9 +56,24 @@ def _build(tasks, windows, integral):
     for k in tasks:
         for m in range(n_m):
             Yi[(k.kid, m)] = off2 + len(Yi)
-    n = off2 + len(Yi)
+    # Coverage segments, indexed on windows ORACLE_SEG_AGG times coarser than
+    # y. Coarsening only gives the relaxation MORE freedom (it loosens which
+    # window a unit of coverage is credited in), so the result is still a
+    # valid upper bound -- and it keeps the full-resolution MILP tractable.
+    agg = max(1, int(C.ORACLE_SEG_AGG))
+    seg = utility.SegmentBlock(yi, off2 + len(Yi),
+                               group_of=lambda key: (key[0], key[1], key[2] // agg))
+    n = off2 + len(Yi) + len(seg)
+    # The maximin fairness floor is exactly LP-representable, which is the
+    # whole reason it -- not Jain -- is what gets optimized: the bound can
+    # carry it, so the gap table stays meaningful. Adding a non-negative term
+    # to a maximization can only raise the optimum, so this stays a bound.
+    umin_i = n if C.UTIL_W_FAIR else None
+    if umin_i is not None:
+        n += 1
 
     c = np.zeros(n)
+    val = np.zeros(n)
     task_by_id = {k.kid: k for k in tasks}
     for (kid, q, m), i in yi.items():
         k = task_by_id[kid]
@@ -70,11 +86,17 @@ def _build(tasks, windows, integral):
         # capacity -- both directions stay generous.
         _, s_start, _ = windows[m]
         t_opt = s_start * C.SLOT_S
-        phi = k.freshness(t_opt)
-        util = k.weight * phi * C.UTILITY[q] / k.n_images
-        late_s = max(0.0, t_opt - k.deadline_s)
-        tardy = C.MPC_LAMBDA_LATE * k.weight * late_s / C.TARDINESS_REF_S / k.n_images
+        util = utility.y_coeff(k, q, t_opt)
+        val[i] = util
+        tardy = utility.objective_tardiness_coeff(k, t_opt)
         c[i] = -(util - tardy)
+    # freshness at the *group* start: the most optimistic instant in the
+    # group, keeping the bound generous in the same direction as above
+    seg.set_objective(c, task_by_id,
+                      lambda g: windows[min(g[2] * agg, n_m - 1)][1] * C.SLOT_S,
+                      val=val)
+    if umin_i is not None:
+        c[umin_i] = -(C.UTIL_W_FAIR * max(len(tasks), 1))
 
     rows, cols, vals, lbs, ubs = [], [], [], [], []
     r = 0
@@ -118,25 +140,41 @@ def _build(tasks, windows, integral):
             if ent:
                 add(ent, -np.inf, C.GS_RATE_BPS * C.SLOT_S * window_slots)
 
+    # the offline bound plans from scratch, so no coverage is pre-consumed
+    seg.add_rows(add, ub_var, yi, task_by_id, rho_of=lambda k: 0.0)
+
+    if umin_i is not None:
+        for k in tasks:
+            const_k, scale_k = utility.fair_row_coeffs(k, realized=0.0)
+            ent = [(umin_i, 1.0)]
+            ent += [(i, -scale_k * val[i])
+                    for (kid, q, m), i in yi.items() if kid == k.kid]
+            ent += [(i, -scale_k * val[i]) for i in seg.columns_of(k.kid)]
+            add(ent, -np.inf, const_k)
+
     A = csr_matrix((vals, (rows, cols)), shape=(r, n))
     integrality = np.zeros(n)
     if integral:
         for v, i in xi.items():
             integrality[i] = 1
             ub_var[i] = 1.0
-    return c, A, np.array(lbs), np.array(ubs), ub_var, integrality
+    lb_var = np.zeros(n)
+    if umin_i is not None:
+        lb_var[umin_i] = -np.inf
+    return c, A, np.array(lbs), np.array(ubs), ub_var, integrality, lb_var
 
 
 def lp_bound(topo, tasks, agg=5):
     t0 = time.perf_counter()
     windows = _windows(C.N_SLOTS, agg)
-    c, A, lbs, ubs, ub_var, integrality = _build(tasks, windows, integral=False)
+    c, A, lbs, ubs, ub_var, integrality, lb_var = _build(tasks, windows,
+                                                        integral=False)
     # constraints mix equalities (lb==ub, the cumulative-Y rows) and
     # inequalities; scipy.optimize.linprog wants those pre-split into
     # A_eq/A_ub, so route the (depth-)relaxed problem through milp with
     # integrality=0 instead, which accepts one combined LinearConstraint.
     res = milp(c=c, constraints=LinearConstraint(A, lbs, ubs),
-              integrality=np.zeros(len(c)), bounds=Bounds(np.zeros(len(c)), ub_var))
+              integrality=np.zeros(len(c)), bounds=Bounds(lb_var, ub_var))
     wall = time.perf_counter() - t0
     obj = -float(res.fun) if res.x is not None else float('nan')
     return dict(objective=obj, wall_s=wall, agg=agg, n_windows=len(windows),
@@ -146,9 +184,10 @@ def lp_bound(topo, tasks, agg=5):
 def mip_bound(topo, tasks, time_limit=300, mip_rel_gap=1e-3):
     t0 = time.perf_counter()
     windows = _windows(C.N_SLOTS, 1)     # full resolution, no aggregation
-    c, A, lbs, ubs, ub_var, integrality = _build(tasks, windows, integral=True)
+    c, A, lbs, ubs, ub_var, integrality, lb_var = _build(tasks, windows,
+                                                        integral=True)
     res = milp(c=c, constraints=LinearConstraint(A, lbs, ubs),
-              integrality=integrality, bounds=Bounds(np.zeros(len(c)), ub_var),
+              integrality=integrality, bounds=Bounds(lb_var, ub_var),
               options={'time_limit': time_limit, 'mip_rel_gap': mip_rel_gap})
     wall = time.perf_counter() - t0
     obj = -float(res.fun) if res.x is not None else float('nan')
@@ -162,8 +201,11 @@ def mip_bound(topo, tasks, time_limit=300, mip_rel_gap=1e-3):
 def analytic_ceiling(tasks):
     """3-line sanity bound: everything delivered instantly at the best
     depth. Catches sign/normalization bugs in the LP/MIP bounds above."""
-    umax = max(C.UTILITY.values())
-    return sum(k.weight * umax for k in tasks)
+    umax = utility.quality_max()
+    per = sum(utility.weight(k) * C.UTIL_W_QUALITY * umax for k in tasks)
+    # the fairness bonus is bounded by omega_F |K| * 1 (every task at its own
+    # ceiling), so adding it keeps this a ceiling too
+    return per + C.UTIL_W_FAIR * len(tasks) * 1.0
 
 
 def report(topo, tasks, results, agg=5, mip_time_limit=120):
@@ -183,6 +225,35 @@ def report(topo, tasks, results, agg=5, mip_time_limit=120):
     L.append(f'LP bound   (continuous depth, {agg}-slot windows, '
              f'{lp["n_vars"]} vars): {lp["objective"]:8.2f}   '
              f'({lp["wall_s"]:.1f}s, status={lp["status"]})')
+    if C.UTIL_W_FAIR:
+        # How much of the bound is the fairness bonus rather than deliverable
+        # value? Worth separating: omega_F |K| u_min can be up to omega_F |K|,
+        # a fixed offset that would otherwise silently inflate every gap.
+        # Dropping the u_min column can leave HiGHS numerically unhappy on the
+        # ~52k-variable LP (status 4), so fall back to a coarser aggregation
+        # and, failing that, say it was not obtainable rather than print a nan.
+        lp0 = None
+        for a in (agg, agg * 2, agg * 4):
+            with C.config_override(UTIL_W_FAIR=0.0):
+                cand = lp_bound(topo, tasks, agg=a)
+            if cand['status'] == 0 and np.isfinite(cand['objective']):
+                lp0 = cand
+                break
+        if lp0 is not None:
+            # compare at the SAME aggregation, or the difference would mix
+            # "fairness removed" with "relaxation coarsened"
+            ref = lp if lp0['agg'] == agg else lp_bound(topo, tasks,
+                                                        agg=lp0['agg'])
+            note = ('' if lp0['agg'] == agg
+                    else f", both at {lp0['agg']}-slot windows")
+            L.append(f'LP bound   (fairness term removed{note}): '
+                     f'{lp0["objective"]:8.2f}   '
+                     f'(fairness contributes '
+                     f'{ref["objective"] - lp0["objective"]:+.2f} of '
+                     f'{ref["objective"]:.2f})')
+        else:
+            L.append('LP bound   (fairness term removed): not obtainable '
+                     '(HiGHS numerical failure without the u_min column)')
     try:
         mip = mip_bound(topo, tasks, time_limit=mip_time_limit)
         gap_txt = (f'  mip_gap={mip["mip_gap"]:.3f}'
@@ -197,9 +268,24 @@ def report(topo, tasks, results, agg=5, mip_time_limit=120):
         bound = lp['objective']
     L.append('')
     L.append(f'{"scheduler":16s} {"utility":>9s} {"gap to bound":>13s}')
+    violations = []
     for name, res in results.items():
         u = res['hist']['utility'][-1]
         gap = (1 - u / bound) * 100 if bound > 0 else float('nan')
         L.append(f'  {name:16s} {u:9.2f} {gap:12.1f}%')
+        if u > bound + 1e-6:
+            violations.append((name, u))
+    # A realized score above the bound means the bound is not a bound. Every
+    # term added to the reported utility must also appear in _build's
+    # objective, relaxed optimistically -- this single check catches
+    # essentially any sign or normalization mistake in the utility terms.
+    if violations:
+        L.append('')
+        L.append('!! BOUND VIOLATED -- the offline relaxation is below a '
+                 'realized schedule.')
+        L.append('!! Some term in the reported utility is missing from '
+                 'oracle._build (see FORMULATION.md).')
+        for name, u in violations:
+            L.append(f'!!   {name}: realized {u:.4f} > bound {bound:.4f}')
     L.append('=' * 74)
     return '\n'.join(L)

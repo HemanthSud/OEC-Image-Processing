@@ -15,3 +15,4 @@ nac/logs/
 FLAIR-1-main/
 hypatia/
 graphify-out/
+/hypatia_sim/oec_scenario/sweep/*_quick.csv

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OEC RQ-NAC — kuiper-630 simulator</title>
+<style>
+  body { margin:0; background:#10151c; color:#dfe6ee; font:13px/1.4 -apple-system, "Segoe UI", sans-serif; }
+  #bar { display:flex; gap:14px; align-items:center; padding:9px 14px; background:#161d27; flex-wrap:wrap; }
+  #bar b { color:#7fb3ff; }
+  button { background:#2a78d6; border:0; color:#fff; padding:5px 14px; border-radius:5px; font-size:13px; cursor:pointer; }
+  select, input[type=range] { accent-color:#2a78d6; }
+  #time { font-variant-numeric:tabular-nums; min-width:130px; }
+  canvas { display:block; width:100%; }
+  #stats { display:flex; gap:22px; padding:7px 14px; background:#161d27; font-variant-numeric:tabular-nums; flex-wrap:wrap; }
+  .lbl { color:#8b97a5; }
+  label { user-select:none; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>OEC RQ-NAC&nbsp;·&nbsp;kuiper-630</b>
+  <button id="play">Pause</button>
+  <span class="lbl">speed</span>
+  <select id="speed">
+    <option value="10">10×</option><option value="60" selected>60×</option>
+    <option value="300">300×</option><option value="1000">1000×</option>
+  </select>
+  <input id="scrub" type="range" min="0" max="18000" value="0" step="10" style="flex:1;min-width:200px">
+  <span id="time"></span>
+  <label><input id="isls" type="checkbox"> ISLs</label>
+  <label><input id="cov" type="checkbox" checked> coverage</label>
+</div>
+<canvas id="cv"></canvas>
+<div id="stats"></div>
+<script>
+"use strict";
+const CFG = {"planes": 34, "spp": 34, "alt_km": 630.0, "incl": 51.9, "F": 1, "min_elev": 20.0, "isl_max_km": 5016.0, "graze_km": 80.0, "sim_s": 18000, "t_orb": 5829.8, "gs": [{"name": "Tokyo", "lat": 35.6895, "lon": 139.6917}, {"name": "New-York", "lat": 40.7127, "lon": -74.0059}, {"name": "Sao-Paulo", "lat": -23.5475, "lon": -46.6361}, {"name": "Sydney", "lat": -33.8678, "lon": 151.2073}], "aoi": [{"name": "California-fires", "lat": 37.0, "lon": -120.0}, {"name": "Amazon-basin", "lat": -3.0, "lon": -60.0}, {"name": "Sahel", "lat": 15.0, "lon": 10.0}, {"name": "Ganges-delta", "lat": 23.0, "lon": 90.0}, {"name": "Barrier-reef", "lat": -18.0, "lon": 147.0}, {"name": "Dnipro-basin", "lat": 49.0, "lon": 32.0}, {"name": "Tohoku-coast", "lat": 38.3, "lon": 141.0}, {"name": "Central-Andes", "lat": -33.0, "lon": -70.0}]};
+const DEG = Math.PI/180, R_E = 6371.0;
+const A = R_E + CFG.alt_km, N_MM = Math.sqrt(398600.4418/(A*A*A));
+const OMEGA_E = 7.2921150e-5;
+const N = CFG.planes*CFG.spp;
+const ci = Math.cos(CFG.incl*DEG), si = Math.sin(CFG.incl*DEG);
+const raan = [], anom0 = [];
+for (let p = 0; p < CFG.planes; p++)
+  for (let s = 0; s < CFG.spp; s++) {
+    raan.push(p*2*Math.PI/CFG.planes);
+    anom0.push(s*2*Math.PI/CFG.spp + p*CFG.F*2*Math.PI/N);
+  }
+const gsXYZ = CFG.gs.map(g => lls([g.lat, g.lon]));
+function lls(ll) { const la = ll[0]*DEG, lo = ll[1]*DEG;
+  return [R_E*Math.cos(la)*Math.cos(lo), R_E*Math.cos(la)*Math.sin(lo), R_E*Math.sin(la)]; }
+
+function satEcef(i, t) {
+  const th = anom0[i] + N_MM*t;
+  const xo = A*Math.cos(th), yo = A*Math.sin(th);
+  const cr = Math.cos(raan[i]), sr = Math.sin(raan[i]);
+  const xe = cr*xo - sr*ci*yo, ye = sr*xo + cr*ci*yo, ze = si*yo;
+  const g = OMEGA_E*t, cg = Math.cos(g), sg = Math.sin(g);
+  return [cg*xe + sg*ye, -sg*xe + cg*ye, ze];
+}
+function lonlat(p) { const r = Math.hypot(p[0], p[1], p[2]);
+  return [Math.atan2(p[1], p[0])/DEG, Math.asin(p[2]/r)/DEG]; }
+function elevDeg(sp, gp) {
+  const d = [sp[0]-gp[0], sp[1]-gp[1], sp[2]-gp[2]];
+  const dd = Math.hypot(d[0], d[1], d[2]), gg = R_E;
+  return Math.asin((d[0]*gp[0]+d[1]*gp[1]+d[2]*gp[2])/(dd*gg))/DEG;
+}
+function losOK(a, b) {                       // ISL feasibility (LOS + range)
+  const d = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+  const L2 = d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+  if (L2 > CFG.isl_max_km*CFG.isl_max_km) return false;
+  let ts = -(a[0]*d[0]+a[1]*d[1]+a[2]*d[2])/Math.max(L2, 1e-9);
+  ts = Math.min(1, Math.max(0, ts));
+  const c = [a[0]+ts*d[0], a[1]+ts*d[1], a[2]+ts*d[2]];
+  return Math.hypot(c[0], c[1], c[2]) >= R_E + CFG.graze_km;
+}
+const isl = [];                              // +grid pairs
+for (let p = 0; p < CFG.planes; p++)
+  for (let s = 0; s < CFG.spp; s++) {
+    const a = p*CFG.spp + s;
+    isl.push([a, p*CFG.spp + (s+1)%CFG.spp]);
+    isl.push([a, ((p+1)%CFG.planes)*CFG.spp + s]);
+  }
+const COAST = [[[-165, 65], [-130, 70], [-95, 70], [-75, 62], [-55, 52], [-65, 45], [-75, 35], [-80, 25], [-95, 18], [-105, 20], [-115, 30], [-125, 40], [-150, 60]], [[-80, 10], [-60, 10], [-50, 0], [-35, -8], [-40, -20], [-55, -35], [-70, -52], [-72, -40], [-70, -20], [-80, -5]], [[-15, 32], [0, 35], [10, 34], [30, 32], [40, 12], [50, 10], [40, -10], [35, -25], [20, -35], [12, -18], [8, 5], [-10, 5], [-17, 15]], [[-10, 36], [0, 44], [5, 50], [10, 55], [20, 60], [30, 70], [40, 68], [50, 60], [40, 48], [28, 40], [15, 38]], [[30, 70], [60, 72], [100, 75], [140, 72], [178, 66], [160, 60], [140, 50], [130, 35], [120, 25], [105, 10], [95, 8], [80, 8], [70, 20], [60, 25], [45, 30], [30, 40]], [[114, -22], [125, -14], [135, -12], [142, -11], [150, -22], [153, -30], [146, -39], [135, -35], [124, -33], [114, -30]]];                     // approximate coastlines
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+let simT = 0, playing = true, last = null;
+function resize() {
+  cv.width = innerWidth; cv.height = Math.min(innerWidth/2, innerHeight-110);
+}
+addEventListener('resize', () => { resize(); });
+resize();
+const X = lon => (lon+180)/360*cv.width, Y = lat => (90-lat)/180*cv.height;
+
+function draw() {
+  const W = cv.width, H = cv.height;
+  ctx.fillStyle = '#10151c'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#1d2733'; ctx.lineWidth = 1;
+  for (let lo = -180; lo <= 180; lo += 30) { ctx.beginPath(); ctx.moveTo(X(lo), 0); ctx.lineTo(X(lo), H); ctx.stroke(); }
+  for (let la = -60; la <= 60; la += 30) { ctx.beginPath(); ctx.moveTo(0, Y(la)); ctx.lineTo(W, Y(la)); ctx.stroke(); }
+  ctx.strokeStyle = '#2c3a4a'; ctx.lineWidth = 1.2;
+  for (const poly of COAST) {
+    ctx.beginPath();
+    poly.forEach((pt, i) => i ? ctx.lineTo(X(pt[0]), Y(pt[1])) : ctx.moveTo(X(pt[0]), Y(pt[1])));
+    ctx.closePath(); ctx.stroke();
+  }
+
+  const pos = [], ll = [];
+  for (let i = 0; i < N; i++) { pos.push(satEcef(i, simT)); ll.push(lonlat(pos[i])); }
+
+  let islOK = 0;
+  if (document.getElementById('isls').checked) {
+    ctx.strokeStyle = 'rgba(80,130,200,0.25)'; ctx.lineWidth = 0.5;
+    for (const [a, b] of isl) {
+      if (!losOK(pos[a], pos[b])) continue;
+      islOK++;
+      if (Math.abs(ll[a][0]-ll[b][0]) < 180) {
+        ctx.beginPath(); ctx.moveTo(X(ll[a][0]), Y(ll[a][1]));
+        ctx.lineTo(X(ll[b][0]), Y(ll[b][1])); ctx.stroke();
+      }
+    }
+  } else for (const [a, b] of isl) if (losOK(pos[a], pos[b])) islOK++;
+
+  ctx.fillStyle = '#eda100';
+  for (const a of CFG.aoi) { ctx.beginPath(); ctx.moveTo(X(a.lon), Y(a.lat)-5);
+    ctx.lineTo(X(a.lon)-4, Y(a.lat)+3); ctx.lineTo(X(a.lon)+4, Y(a.lat)+3); ctx.fill(); }
+
+  ctx.fillStyle = '#7fb3ff';
+  for (let i = 0; i < N; i++) ctx.fillRect(X(ll[i][0])-1, Y(ll[i][1])-1, 2, 2);
+
+  const visible = [];
+  const showCov = document.getElementById('cov').checked;
+  CFG.gs.forEach((g, gi) => {
+    let n = 0;
+    for (let i = 0; i < N; i++) {
+      const el = elevDeg(pos[i], gsXYZ[gi]);
+      if (el >= CFG.min_elev) {
+        n++;
+        if (showCov && Math.abs(ll[i][0]-g.lon) < 180) {
+          ctx.strokeStyle = 'rgba(27,175,122,0.55)'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(X(g.lon), Y(g.lat));
+          ctx.lineTo(X(ll[i][0]), Y(ll[i][1])); ctx.stroke();
+        }
+      }
+    }
+    visible.push(n);
+    ctx.fillStyle = '#ff6a6a';
+    ctx.beginPath(); ctx.arc(X(g.lon), Y(g.lat), 4, 0, 7); ctx.fill();
+    ctx.fillStyle = '#dfe6ee'; ctx.font = '11px sans-serif';
+    ctx.fillText(g.name, X(g.lon)+7, Y(g.lat)-5);
+  });
+
+  const hh = String(Math.floor(simT/3600)).padStart(2,'0'),
+        mm = String(Math.floor(simT/60)%60).padStart(2,'0'),
+        ss = String(Math.floor(simT)%60).padStart(2,'0');
+  document.getElementById('time').textContent = `t = ${hh}:${mm}:${ss} / ${CFG.sim_s/3600} h`;
+  document.getElementById('scrub').value = simT;
+  document.getElementById('stats').innerHTML =
+    `<span><span class="lbl">satellites</span> ${N}</span>` +
+    `<span><span class="lbl">feasible ISLs</span> ${islOK}/${isl.length}</span>` +
+    CFG.gs.map((g, i) => `<span><span class="lbl">${g.name}</span> ${visible[i]} sats</span>`).join('') +
+    `<span><span class="lbl">orbit</span> ${(simT/CFG.t_orb).toFixed(2)}</span>`;
+}
+
+function tick(ts) {
+  if (last === null) last = ts;
+  if (playing) {
+    simT += (ts-last)/1000 * Number(document.getElementById('speed').value);
+    if (simT > CFG.sim_s) simT = 0;
+  }
+  last = ts;
+  draw();
+  requestAnimationFrame(tick);
+}
+document.getElementById('play').onclick = e => {
+  playing = !playing; e.target.textContent = playing ? 'Pause' : 'Play'; };
+document.getElementById('scrub').oninput = e => { simT = Number(e.target.value); };
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import time
 import numpy as np
 
 from . import config as C
+from . import utility
 from . import topology as T
 from . import tasks as TK
 from .schedulers import GreedyScheduler, MPCScheduler
@@ -44,8 +45,15 @@ def run_schedulers(topo, extra_makers=()):
         print(f'  {sched.name:16s}  {time.time() - t0:6.1f} s  '
               f'delivered {hist["delivered_images"][-1]:12,.0f} images  '
               f'utility {hist["utility"][-1]:8.2f}')
-        results[sched.name] = {'hist': hist, 'tasks': tasks,
-                               'solve_log': getattr(sched, 'solve_log', [])}
+        results[sched.name] = {
+            'hist': hist, 'tasks': tasks,
+            'solve_log': getattr(sched, 'solve_log', []),
+            'route_rows': getattr(sched, 'route_rows', []),
+            'n_route_fallbacks': getattr(sched, 'n_route_fallbacks', 0),
+            'n_route_lookups': getattr(sched, 'n_route_lookups', 0),
+            'n_route_exec': getattr(sched, 'n_route_exec', 0),
+            'n_route_exec_fallbacks': getattr(
+                sched, 'n_route_exec_fallbacks', 0)}
     return results
 
 
@@ -108,6 +116,7 @@ def write_outputs(topo, results):
                     k.dropped or completion_s is None or completion_s > k.deadline_s),
                 'dropped': int(k.dropped),
                 'rejected': int(k.rejected),
+                **{kk: round(vv, 6) for kk, vv in utility.components(k).items()},
             })
         _write_csv(os.path.join(C.OUT_DIR, f'task_outcomes_{name}.csv'),
                    rows, list(rows[0].keys()))
@@ -124,6 +133,9 @@ def write_outputs(topo, results):
                 for i in range(len(hist['t_s']))]
         _write_csv(os.path.join(C.OUT_DIR, f'timeline_{name}.csv'),
                    rows, list(rows[0].keys()))
+        if res.get('route_rows'):
+            _write_csv(os.path.join(C.OUT_DIR, f'routes_{name}.csv'),
+                       res['route_rows'], list(res['route_rows'][0].keys()))
 
 
 def build_summary(topo, results):
@@ -196,6 +208,58 @@ def build_summary(topo, results):
                  f'{100 * n_viol / len(tk):6.1f}% {n_dropped:8d}')
     L.append('')
 
+    L.append('── Unified utility decomposition ────────────────────────────')
+    L.append(f'  quality source: {utility.quality_source_label()}')
+    L.append(f'  mode={C.UTIL_MODE}  weights  omega_Q={C.UTIL_W_QUALITY} '
+             f'omega_T={C.UTIL_W_TARDY} omega_E={C.UTIL_W_COST} '
+             f'omega_F={C.UTIL_W_FAIR}  segments={len(C.UTIL_COVERAGE_BREAKS)}')
+    L.append(f'  s_q = ' + '  '.join(f'{q}:{v:.4f}'
+                                     for q, v in sorted(utility.quality_table().items())))
+    L.append(f'  {"scheduler":16s} {"total":>8s} {"quality":>8s} {"-tardy":>8s} '
+             f'{"-cost":>7s} {"+fair":>7s} {"u_min":>7s} {"jain":>6s} '
+             f'{"enc kJ":>8s} {"tx kJ":>7s}')
+    for name, res in results.items():
+        tot, terms, jain, umin = utility.run_utility(res['tasks'])
+        L.append(f'  {name:16s} {tot:8.3f} {terms["quality"]:8.3f} '
+                 f'{-terms["tardiness"]:8.3f} {-terms["cost"]:7.3f} '
+                 f'{terms["fairness"]:7.3f} {umin:7.4f} {jain:6.4f} '
+                 f'{terms["enc_energy_j"] / 1e3:8.1f} '
+                 f'{terms["tx_energy_j"] / 1e3:7.2f}')
+    L.append('  (Jain is a DIAGNOSTIC only -- it is a ratio of quadratics and')
+    L.append('   is not MILP-representable, so u_min is what gets optimized.)')
+    L.append('')
+
+    L.append('── Routing ──────────────────────────────────────────────────')
+    L.append(f'  {"scheduler":16s} {"hops":>6s} {"delay ms":>9s} '
+             f'{"paths/(k,t)":>12s} {"frozen ok @exec":>16s} {"@horizon":>9s} '
+             f'{"route LPs":>10s} {"route s":>8s}')
+    for name, res in results.items():
+        rr = res.get('route_rows') or []
+        rlog = [x for x in (res.get('solve_log') or [])
+                if x.get('level') == 'route']
+        look = res.get('n_route_lookups', 0)
+        fb = res.get('n_route_fallbacks', 0)
+        if not rr and not look and not rlog:
+            L.append(f'  {name:16s} {"-":>6s} {"-":>9s} {"-":>12s} '
+                     f'{"static":>16s} {"-":>9s} {0:10d} {0.0:8.2f}')
+            continue
+        hops = f'{np.mean([r["hops"] for r in rr]):6.1f}' if rr else f'{"-":>6s}'
+        dly = (f'{np.mean([r["delay_s"] for r in rr]) * 1e3:9.2f}' if rr
+               else f'{"-":>9s}')
+        npaths = (f'{np.mean([r["n_paths"] for r in rr]):12.2f}' if rr
+                  else f'{"-":>12s}')
+        ex, exfb = res.get('n_route_exec', 0), res.get('n_route_exec_fallbacks', 0)
+        surv = (f'{100 * (ex - exfb) / ex:15.1f}%' if ex else f'{"n/a":>16s}')
+        surv_h = (f'{100 * (look - fb) / look:8.1f}%' if look
+                  else f'{"n/a":>9s}')
+        L.append(f'  {name:16s} {hops} {dly} {npaths} {surv} {surv_h} '
+                 f'{len(rlog):10d} {sum(x["wall_s"] for x in rlog):8.2f}')
+    L.append('  (frozen ok @exec = a route frozen for a macro-epoch was still')
+    L.append('   feasible at the slot it was USED; @horizon = across the whole')
+    L.append('   planning lookahead. The price of the hierarchical coupling on')
+    L.append('   a MOVING constellation -- GSL contacts last only ~230-265 s.)')
+    L.append('')
+
     L.append('── Delay / depth mix ────────────────────────────────────────')
     for name, res in results.items():
         tk = res['tasks']
@@ -226,6 +290,76 @@ def build_summary(topo, results):
     return '\n'.join(L)
 
 
+GOLDEN_PATH = os.path.join(C.OUT_DIR, 'golden', 'legacy_summary.json')
+
+
+def golden_snapshot(results, oracle_txt=None):
+    """Machine-readable fingerprint of a run, for the legacy regression gate."""
+    import json  # noqa: F401  (kept local; json is only needed for the gate)
+    snap = {'utility_mode': C.UTIL_MODE, 'scenario': C.SCENARIO,
+            'schedulers': {}}
+    for name, r in sorted(results.items()):
+        tasks = r['tasks']
+        snap['schedulers'][name] = {
+            'utility': round(r['hist']['utility'][-1], 6),
+            'images': round(r['hist']['delivered_images'][-1], 3),
+            'depth_mix': {str(q): sum(1 for k in tasks if k.depth == q)
+                          for q in C.DEPTHS},
+            'dropped': sum(1 for k in tasks if k.dropped),
+        }
+    if oracle_txt:
+        for line in oracle_txt.splitlines():
+            for key, tag in (('analytic ceiling', 'analytic_ceiling'),
+                             ('LP bound', 'lp_bound')):
+                if line.strip().startswith(key):
+                    try:
+                        snap[tag] = float(line.split(':')[1].split()[0])
+                    except (IndexError, ValueError):
+                        pass
+    return snap
+
+
+def check_golden(snap, path=None, tol=1e-4):
+    """Assert `snap` matches the committed golden file. Returns a report
+    string and a bool; the caller exits non-zero on failure."""
+    import json
+    # resolved at call time, not bound as a default: --out-suffix rewrites
+    # GOLDEN_PATH after this module is imported
+    path = path or GOLDEN_PATH
+    if not os.path.exists(path):
+        return f'!! no golden file at {path} -- write one with --write-golden', False
+    with open(path) as fh:
+        gold = json.load(fh)
+    bad, skipped = [], []
+    if gold.get('utility_mode') != snap.get('utility_mode'):
+        bad.append(f"utility_mode {gold.get('utility_mode')} != {snap.get('utility_mode')}")
+    for name, g in gold.get('schedulers', {}).items():
+        got = snap['schedulers'].get(name)
+        if got is None:
+            # not run (e.g. mpc-hier without --hier). Not drift -- say so
+            # rather than failing, so a bare --check-golden stays usable.
+            skipped.append(name)
+            continue
+        for field in ('utility', 'images'):
+            if abs(got[field] - g[field]) > max(tol, tol * abs(g[field])):
+                bad.append(f'{name}.{field}: {got[field]} != {g[field]} (golden)')
+        if got['depth_mix'] != g['depth_mix']:
+            bad.append(f"{name}.depth_mix: {got['depth_mix']} != {g['depth_mix']}")
+        if got['dropped'] != g['dropped']:
+            bad.append(f"{name}.dropped: {got['dropped']} != {g['dropped']}")
+    for tag in ('analytic_ceiling', 'lp_bound'):
+        if tag in gold and tag in snap and abs(gold[tag] - snap[tag]) > 1e-2:
+            bad.append(f'{tag}: {snap[tag]} != {gold[tag]} (golden)')
+    if bad:
+        return ('!! GOLDEN CHECK FAILED (' + str(len(bad)) + ' mismatches)\n  '
+                + '\n  '.join(bad)), False
+    n = len(gold.get('schedulers', {})) - len(skipped)
+    msg = f'golden check passed: {n} schedulers match {os.path.relpath(path)}'
+    if skipped:
+        msg += f"  (not run, so not checked: {', '.join(sorted(skipped))})"
+    return msg, True
+
+
 def main(argv=None):
     import argparse
     p = argparse.ArgumentParser()
@@ -236,11 +370,39 @@ def main(argv=None):
                         'Dr. Liu\'s directive) alongside the flat mpc')
     p.add_argument('--hier', action='store_true',
                    help='also run mpc-hier (hierarchical MPC)')
+    p.add_argument('--twolevel', action='store_true',
+                   help='also run mpc-2level (routing MPC and depth MPC as '
+                        'iterated peers)')
+    p.add_argument('--hier-route', action='store_true',
+                   help='also run mpc-hier-route (slow routing MPC freezing '
+                        'a path set for a fast depth MPC)')
+    p.add_argument('--couplings', action='store_true',
+                   help='shorthand for --twolevel --hier-route --hier')
     p.add_argument('--oracle', action='store_true',
                    help='compute the HiGHS offline upper bound and append '
                         'the optimality-gap table to summary.txt')
+    p.add_argument('--utility', default=C.UTIL_MODE, choices=('legacy', 'unified'),
+                   help="'legacy' reproduces the committed single-factor "
+                        "score exactly; 'unified' turns on the four-factor "
+                        'score (quality/timeliness/coverage/cost + fairness)')
+    p.add_argument('--check-golden', action='store_true',
+                   help='assert the run reproduces oec_scenario/golden/'
+                        'legacy_summary.json to 1e-4 and exit non-zero on '
+                        'drift (regression gate for the committed numbers)')
+    p.add_argument('--write-golden', action='store_true',
+                   help='(re)write the golden file from this run')
+    p.add_argument('--out-suffix', default='',
+                   help='write outputs to oec_scenario<suffix>/ instead, so a '
+                        'second scenario (e.g. the coupling comparison) can be '
+                        'committed alongside the canonical run')
     args = p.parse_args(argv)
     C.apply_scenario(args.scenario)
+    C.apply_utility_mode(args.utility)
+    if args.out_suffix:
+        global GOLDEN_PATH
+        C.OUT_DIR = C.OUT_DIR + args.out_suffix
+        os.makedirs(C.OUT_DIR, exist_ok=True)
+        GOLDEN_PATH = os.path.join(C.OUT_DIR, 'golden', 'legacy_summary.json')
 
     print(f'Building topology... (scenario={args.scenario})')
     t0 = time.time()
@@ -251,9 +413,17 @@ def main(argv=None):
     extra_makers = []
     if args.congestion:
         extra_makers.append(lambda tp, tk: MPCScheduler(tp, tk, route_mode='predictive'))
+    if args.couplings:
+        args.hier = args.twolevel = args.hier_route = True
     if args.hier:
         from .hier import HierarchicalMPCScheduler
         extra_makers.append(lambda tp, tk: HierarchicalMPCScheduler(tp, tk))
+    if args.twolevel:
+        from .twolevel import TwoLevelMPCScheduler
+        extra_makers.append(lambda tp, tk: TwoLevelMPCScheduler(tp, tk))
+    if args.hier_route:
+        from .hier import HierRouteMPCScheduler
+        extra_makers.append(lambda tp, tk: HierRouteMPCScheduler(tp, tk))
 
     print('Running schedulers...')
     results = run_schedulers(topo, extra_makers=extra_makers)
@@ -278,6 +448,20 @@ def main(argv=None):
         f.write(summary)
     print()
     print(summary)
+
+    if args.write_golden or args.check_golden:
+        import json
+        snap = golden_snapshot(results, oracle_txt)
+        if args.write_golden:
+            os.makedirs(os.path.dirname(GOLDEN_PATH), exist_ok=True)
+            with open(GOLDEN_PATH, 'w') as f:
+                json.dump(snap, f, indent=2, sort_keys=True)
+            print(f'wrote golden -> {os.path.relpath(GOLDEN_PATH)}')
+        if args.check_golden:
+            msg, ok = check_golden(snap)
+            print(msg)
+            if not ok:
+                raise SystemExit(1)
 
     try:
         from . import plots

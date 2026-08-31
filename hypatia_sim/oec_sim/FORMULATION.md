@@ -64,12 +64,186 @@ it trained is retired.
 | 8 | 704 | 20.73 | 0.5171 | 0.4829 |
 | 16 | 1408 | 21.06 | 0.5039 | 0.4961 |
 
-Still measured on 7,050 FLAIR-1 val images, single depth-16 model truncated
-to its first $q$ stages (`truncation_eval.txt`). **Research risk, unchanged
-by this pass:** $u_q$ spans only 0.443 -> 0.496 (+12%) while $b_q$ spans 8x,
-so depth choice is still driven mainly by deliverability, not reconstructed
-quality; the real fix is swapping in downstream-task metrics (mIoU / F1),
-still on the README pending list.
+Measured on 7,050 FLAIR-1 val images, single depth-16 model truncated to its
+first $q$ stages (`truncation_eval.txt`).
+
+**The research risk this pass set out to remove:** $u_q$ spans only
+0.443 -> 0.496 (+12%) while $b_q$ spans 8x, so depth choice was driven almost
+entirely by deliverability rather than by quality. That is why `greedy-fixed-8`
+(64.15) came within 1.2% of the MPC (64.95) -- there was barely a decision to
+get right.
+
+The fix is to replace the reconstruction proxy with **downstream segmentation
+performance**: $s_q$ = mIoU of the FLAIR-1 baseline segmenter run on the
+depth-$q$ reconstruction. `UTIL_QUALITY_SOURCE = 'miou'` selects it and
+`utility.load_quality_table()` reads `oec_sim/quality_table.json`, written by
+`rq-vae/downstream/harvest_metrics.py`.
+
+Two anchorings, `UTIL_QUALITY_ANCHOR`:
+
+* `ratio`: $s_q = \text{mIoU}_q/\text{mIoU}_{\text{ref}}$.
+* `floor` (default): $s_q = (\text{mIoU}_q-\text{mIoU}_{\text{floor}})/(\text{mIoU}_{\text{ref}}-\text{mIoU}_{\text{floor}})$,
+  where $\text{mIoU}_{\text{floor}}$ is the **blanked-RGB** condition --
+  the segmenter run on NIR + Elevation with the optical bands carrying no
+  information. The decision-theoretic zero for a scheduler is not
+  "mIoU = 0" but "what you get by *not* delivering the image", which is
+  exactly that condition. `recon_to_geotiff.py --depth blank` produces it.
+
+Both are written to `quality_table.json` so the choice stays visible and
+reversible. **If the spread is still narrow after floor anchoring, that is the
+finding** -- report it rather than tuning it away.
+
+Until the server sweep lands, `config.QUALITY_TABLE_FALLBACK` supplies a
+clearly-labelled PROVISIONAL table so `run_all` works on a laptop; every run
+that uses it prints `PROVISIONAL - NOT MEASURED` in `summary.txt`. Numbers
+quoted from unified-mode runs below inherit that caveat.
+
+## Unified utility (the reported score AND the objective)
+
+Until this pass, utility was defined in **five places that disagreed**: the
+realized score (`schedulers._record_delivery`) had only
+$w_k\phi_k u_q\rho_k$; the flat MPC objective added a backlog bonus and a
+tardiness penalty; the hierarchical upper level had neither; its lower level
+swapped the backlog bonus for a Lyapunov backpressure term; and the offline
+bound had a third combination. Timeliness, coverage and depth mix lived in
+side tables, so no single number said whether a scheduler was good.
+
+`oec_sim/utility.py` is now the single source of truth for all five. With
+$\bar w_k = w_k/\max_j w_j$ and arrival time
+$t^{\text{arr}} = (t{+}1)\Delta t + \delta_{k,t}$ along the path actually used:
+
+$$U_k \;=\; \bar w_k\Big[\;\omega_Q\, s_{q_k}\,\hat G_k \;-\; \omega_T\,T_k \;-\; \omega_E\, C_k\Big],
+\qquad
+U \;=\; \sum_k U_k \;+\; \omega_F\,|\mathcal K|\,\min_k \hat U_k$$
+
+| term | meaning | range |
+|---|---|---|
+| $s_q$ | downstream **segmentation** quality at depth $q$ (mIoU-derived), or the legacy reconstruction proxy $1-\text{LPIPS}_q$ | $[0,1]$ |
+| $\hat G_k$ | coverage gain: a **concave** function of delivered fraction, each image weighted by the freshness at which it arrived | $[0,1]$ |
+| $T_k$ | tardiness, $\sum_t \frac{\Delta r_{k,t}}{N_k}\min\!\big(1,\frac{\max(0,\,t^{\text{arr}}-d_k)}{\Delta_{\text{ref}}}\big)$ | $[0,1]$ |
+| $C_k$ | resource cost, $\sum_t \frac{\Delta r_{k,t}}{N_k}\big[\hat\omega_{\text{tx}}\frac{b_q}{b_{\max}}+\hat\omega_{\text{enc}}\big]$ | $[0,1]$ |
+| $\hat U_k$ | $U_k/(\omega_Q s_{\max}\bar w_k)$ — scale-free **and weight-relative** | $\le 1$ |
+
+The $\min(1,\cdot)$ in $T_k$ applies to a *coefficient* (arrival times are
+data, not variables), so it costs nothing in linearity.
+
+**Legacy identity.** With $\omega_Q{=}1$, $\omega_T{=}\omega_E{=}\omega_F{=}0$,
+one coverage segment of unit width and unit slope, no weight normalization and
+$s_q = 1-\text{LPIPS}_q$, this collapses *literally* to the old
+$\sum_k\sum_t w_k\phi_k(t^{\text{arr}})u_{q_k}\Delta r_{k,t}/N_k$. Legacy is a
+parameter setting, not a code branch, which is why `--utility legacy` still
+reproduces every committed number exactly (`--check-golden` enforces it).
+
+### Concave coverage without breaking linearity
+
+Introduce $\lambda_{k,q,\tau,j}\ge 0$ over $J$ segments of width $\Delta_j$ and
+**strictly decreasing** slopes $m_1>\dots>m_J$, with $\sum_j\Delta_j m_j = 1$:
+
+$$\hat G_k=\sum_{\tau,j} m_j\,\phi_k(t^{\text{arr}}_\tau)\,\lambda_{k,q,\tau,j},
+\quad
+\sum_j \lambda_{k,q,\tau,j}=\frac{y_{k,q,\tau}}{N_k},
+\quad
+\sum_{q,\tau}\lambda_{k,q,\tau,j}\le\Delta_j^{\text{res}}$$
+
+**No binaries and no SOS2 are required.** A concave separable function being
+*maximized* linearizes exactly: because the slopes decrease, the LP relaxation
+saturates segment 1 before touching segment 2, so the concave envelope is tight
+at every vertex. Indexing $\lambda$ by $q$ as well as $j$ is what lets $s_q$
+multiply the coverage gain while both stay linear.
+
+*Why no chronological-ordering constraints are needed*: nothing forces the
+solver to fill segments in time order, but it does so anyway. The sub-problem
+is a transportation problem with cost $m_j\phi_\tau$, where $m_j$ is decreasing
+in $j$ and $\phi_\tau$ is non-increasing in $\tau$; by the rearrangement
+inequality the north-west-corner (chronological) assignment is optimal. The LP
+value therefore equals the chronological value that
+`utility.CoverageAccumulator` computes on the realized side.
+
+$\Delta_j^{\text{res}}$ is the width still **unclaimed** at the coverage
+already realized before this horizon. Omitting the residual would let the MPC
+re-earn the steep segment-1 credit at every re-plan.
+
+Default $J=4$, a discretization of $g(\rho)=(1-e^{-3\rho})/(1-e^{-3})$:
+widths $(.25,.25,.25,.25)$, slopes $(2.00,1.12,0.60,0.28)$.
+
+`UTIL_SEG_STRIDE` indexes the $\lambda$ columns every $N$ horizon steps rather
+than every step (freshness taken at the group's first step). Measured on the
+default scenario: stride 1 → 33.1 s / utility 24.248; stride 3 → 14.0 s /
+24.795; stride 5 → 15.1 s / 24.780; stride 10 → 12.8 s / 24.780, against a
+10.1 s legacy baseline. Coarser indexing is both **faster and slightly
+better** here — the smaller MILP solves more reliably inside HiGHS's default
+effort — so exact per-step columns buy nothing. Default 5.
+
+### Fairness: maximin, not Jain
+
+Jain's index $(\sum U_k)^2/(n\sum U_k^2)$ is a ratio of quadratics and is not
+MILP-representable. It is therefore **reported as a diagnostic only**. What is
+optimized is a maximin floor: one continuous column $u_{\min}$ plus
+$|\mathcal K|$ rows $u_{\min}\le\hat U_k$, with $+\omega_F|\mathcal K|u_{\min}$
+in the objective.
+
+* $\hat U_k$ must be **cumulative** (realized utility as a constant plus the
+  in-horizon linear expression); the within-window gain alone would make every
+  late-admitted task look starved and turn the term into noise.
+* Normalizing by $\omega_Q s_{\max}\bar w_k$ makes the floor weight-relative:
+  each task is measured against a fraction of *its own* achievable value, so
+  the floor cannot be gamed by starving low-weight AOIs, nor does it perversely
+  starve high-weight ones.
+* $u_{\min}$ needs a **free lower bound** — $\hat U_k$ goes negative once the
+  tardiness/cost penalties exceed the quality gain, and a floor pinned at 0
+  would make the row infeasible.
+* **The deciding argument is the oracle.** The maximin form is exactly
+  LP-representable, so `oracle.py` can carry it and the gap table stays
+  meaningful; Jain cannot be, so putting Jain in the score would permanently
+  break the bound.
+
+Measured effect (congested, `GS_RATE_BPS` = 1 Mbps): $\omega_F=0$ gives
+$u_{\min}=0.6475$, Jain 0.9905, $\sum_k U_k=37.211$; $\omega_F=0.10$ gives
+$u_{\min}=0.7024$, Jain 0.9948, $\sum_k U_k=36.687$. So the floor buys **+8.5%
+for the worst-served task at a cost of 1.4% of aggregate utility**, and
+saturates by $\omega_F=0.1$ — which is why that is the default.
+
+### Energy: a measured negative result
+
+$t_{\text{enc}}=12.34$ ms was measured at **both** $8\!\times\!8\!\times\!1$ and
+$8\!\times\!8\!\times\!8$ ($\sigma\approx0.03$–$0.05$ ms), so encode time does
+not vary with depth. Per image: encode $=30\,\text{W}\times12.34\,\text{ms}=0.370$ J;
+downlink at $q{=}16 = 11{,}264\,\text{bits}\times2\times10^{-7}=2.25\times10^{-3}$ J.
+**Encode dominates downlink by ~164× per image (~230× over a whole run's depth
+mix), and encode is depth-independent** — so a literal Joule-denominated term
+is nearly constant in $q$ and *cannot* drive depth choice. Depth selection in
+this system is a **bandwidth** decision, not an energy one.
+
+The objective therefore uses a normalized, unit-free `cost_coeff(q)` whose
+*shape* is physical and whose *scale* is a stated policy weight
+($\omega_E=0.05$, a tie-breaker); absolute Joules are reported in
+`summary.txt` and `task_outcomes_*.csv` as accounting only. $P_{\text{enc}}=30$ W
+(Jetson AGX Orin mid-band — the A6000 the timing came from is not a flight
+part) and $P_{\text{tx}}=20$ W are **assumed** and labelled as such in
+`config.py`.
+
+### Keeping the offline bound valid
+
+Rule: every term in the reported score must appear in the bound's objective,
+relaxed in the optimistic direction.
+
+| term | in the bound | valid because |
+|---|---|---|
+| $s_q$ | same table | exact |
+| $\phi_k$, $T_k$ | evaluated at **window start** | most optimistic instant in the window |
+| $\lambda$ coverage | same segments, grouped `ORACLE_SEG_AGG`× coarser than $y$ | coarser grouping only *loosens* which window credit lands in |
+| $C_k$ | exact per-$(k,q)$ constant | a penalty must not be over-charged, and it isn't |
+| $\omega_F|\mathcal K|u_{\min}$ | 1 column + $|\mathcal K|$ rows | adding a non-negative term to a max can only raise the optimum |
+
+`oracle.report` now **asserts** `bound >= realized` for every scheduler and
+prints a loud `!! BOUND VIOLATED` otherwise — one check that catches
+essentially any sign or normalization mistake in the terms above. It found a
+real one during this pass: the bound is handed an already-simulated task list
+but re-plans every task from scratch, so `fair_row_coeffs` was double-counting
+`delivered_utility` as the maximin constant, letting $u_{\min}$ reach ~2 and
+pushing the LP bound (51.16) *above* the analytic ceiling (50.58). Fixed by
+passing `realized=0.0`; the ordering is now ceiling 50.58 > LP 46.22 >
+MILP dual 45.72 ≥ realized 44.56.
 
 ## MPC objective (eq. 8, extended)
 
@@ -132,6 +306,118 @@ work, not built.
 table above; under `gbs-limited` the GBS aggregate budget dominates every
 route regardless of ISL cost, so `mpc-congestion` is a provable no-op there
 (verified: iteration-0 output is bit-identical to `route_mode='static'`).
+
+## Two-MPC split: routing MPC + depth MPC
+
+Dr. Liu: *"Hierarchical MPC -- one MPC to select the best path, another one
+[for the rest]."* `hier.py`'s original split was admission/budget vs depth,
+with **static routing at both levels**, so the routing/depth split was never
+actually built. It now exists in two forms, and both are reported.
+
+### Candidate path sets
+
+Both need more than one path per $(k,\tau)$. Full Yen's $K$-shortest over a
+1,160-node graph per $(k,\tau)$ is unaffordable, so
+`routing.PredictiveRouter.build_multi` uses **edge-penalized re-Dijkstra**:
+round $i$ re-solves the per-$(\tau, g)$ trees with every edge used by rounds
+$1..i{-}1$ scaled by $(1+\texttt{ROUTE\_DIVERSITY\_PENALTY})$. One Dijkstra
+call yields the tree for *all* sources, so $K$ rounds give $K$ candidates for
+every task at once. These are **diversified** paths, not provably the $K$
+shortest -- stated plainly; Yen's remains the right tool if exact
+$K$-shortest for a single $(k,\tau)$ is ever needed.
+
+Verified: $K{=}1$ is bit-identical to `build()`; at $K{=}3$, 88% of
+$(k,\tau)$ pairs get $\ge 2$ distinct candidates, every hop is feasible in
+`isl_ok`/`gsl_ok`, and delays are non-decreasing across rounds.
+
+### `mpc-2level` — iterated peers (`twolevel.py`)
+
+Routing MPC = min-cost multicommodity flow, continuous, so a pure LP:
+
+$$\min \sum_{k,p,\tau} f_{k,p,\tau}\frac{\delta_{p,\tau}}{\Delta^{\text{delay}}_{\text{ref}}}
+      + M\sum_{k,\tau}\text{sh}_{k,\tau}
+\quad\text{s.t.}\quad
+\sum_p f_{k,p,\tau}+\text{sh}_{k,\tau}=D_{k,\tau},\quad
+\sum_{k}\sum_{p\ni e} f_{k,p,\tau}\le C_e\Delta t$$
+
+The capacity rows are what make this a routing *optimizer*: a linear delay
+objective without them would simply re-pick the shortest path, i.e. Dijkstra
+in an expensive wrapper. Congestion enters endogenously through the capacity
+duals.
+
+The mix returns per-edge **shares** $\theta$, and the depth MILP's capacity
+rows become $\sum_k\sum_q b_q\!\cdot\!8\big(\sum_{p\ni e}\theta_{k,p,\tau}\big)y_{k,q,\tau}\le C_e\Delta t$
+— structurally the same rows, one coefficient change. That is what lets
+multipath enter the depth problem **without adding any path variables to it**.
+
+They exchange demand $\leftrightarrow$ mix and iterate with the same MSA
+damping ($\eta = 1/(it{+}2)$) and keep-best-iterate the predictive router
+already uses. Iteration 0 *is* the flat MPC, so `mpc-2level` can never plan
+worse than `mpc`. Verified: `MPC2L_ITERS=1, MPC_ROUTE_NPATHS=1` reproduces
+`mpc` bit-for-bit.
+
+> **A correctness trap worth recording.** $D_{k,\tau}$ must be what a task
+> *wants* to move, not what the depth MILP already conceded. Deriving it from
+> the previous plan is circular: that plan was already feasible against the
+> static single paths, so the routing LP faces no contention, finds the
+> shortest path optimal for everything, and reproduces Dijkstra. The first
+> implementation did exactly this, and `mpc-2level` came out **bit-for-bit
+> equal to `mpc`** even on a fabric with 30% of links oversubscribed. The
+> honest demand is what the encoder can supply and the task still owes
+> (`_desired_bits`); with that fixed, 35% of $(k,\tau)$ decisions become
+> genuinely multipath (mean 1.40 paths).
+
+### `mpc-hier-route` — slow routing, fast depth (`hier.py`)
+
+A `RouteCoordinatorMPC` runs once per macro-epoch (10 min) over a 60-slot
+horizon in 10-slot macro-windows, on the topology at each window's **middle**
+slot (a forecast, documented as one). It takes the existing
+`CoordinatorMPC._lp_allocate` budgets $B_k$, solves the same flow LP in bits,
+and freezes the top-`HIER_ROUTE_KEEP` paths per task for the epoch. The
+existing fast depth MILP then solves inside those paths. `Directive` gains
+`routes` and `route_delay`; empty dicts reproduce `mpc-hier` exactly
+(verified bit-for-bit with `HIER_ROUTE_ON=False`).
+
+> **A second scaling trap.** The flow coefficient is $\delta/\Delta_{\text{ref}}\sim O(1)$
+> *per bit*, so the shortfall big-M must also be per-bit. An earlier version
+> divided it by $10^9$ (bits $\to$ Gbit) without normalizing the flow term the
+> same way, making shorting $\sim5\times10^5$ times **cheaper** than routing:
+> the LP shorted everything, returned zero routes, and `mpc-hier-route`
+> silently degenerated into `mpc-hier`. Both traps produce the same symptom --
+> a routing coupling that looks like a clean "no difference" result -- which is
+> why `summary.txt` now reports paths-per-decision and frozen-route survival
+> rather than utility alone.
+
+### Measured: freezing routes does not survive a LEO fabric
+
+The fallback counter (frozen route infeasible $\to$ revert to the geometric
+path) is the quantitative price of the hierarchical coupling:
+
+| macro-epoch | window | utility | fallback rate |
+|---|---|---|---|
+| 20 slots (10 min) | 10 | 19.419 | 92.8% |
+| 10 slots (5 min) | 5 | 19.459 | 94.4% |
+| 5 slots (2.5 min) | 5 | 19.459 | 94.4% |
+| 4 slots (2 min) | 2 | 18.895 | 90.6% |
+
+Split by lookahead, a route frozen at epoch start survives:
+
+| $\tau$ | lookahead | survives |
+|---|---|---|
+| 0 | 0 s | **14.4%** |
+| 1 | 30 s | 11.7% |
+| 5 | 150 s | 12.2% |
+| 10 | 300 s | 3.3% |
+| 19 | 570 s | 0.0% |
+
+Even at the **executed** slot with zero lookahead the frozen route is usable
+only 14.4% of the time, and shortening the epoch does not help. This is
+structural, not a tuning failure: a concrete path is pinned to specific
+satellites, and GSL contact windows here average 227-265 s, so the satellite
+serving a given GBS turns over faster than any useful planning epoch. The
+caveat: this is a negative result about freezing **concrete paths**. Freezing
+a more abstract decision (a serving-GBS assignment, or a route *class*) might
+survive; that is future work, not something measured here.
 
 ## Hierarchical MPC + the rotting-backlog fix
 

@@ -1,0 +1,117 @@
+==========================================================================
+OEC RQ-NAC Network Simulation — Summary
+==========================================================================
+Constellation   kuiper-630: Walker 1156/34/1  (34 planes x 34 sats)
+Altitude        630 km   inclination 51.9°  orbital period 5830 s
+ISLs            +Grid, 2312 candidate links, LOS-gated (graze > 80 km) + range <= 5016 km
+                feasible on average: 2312/2312 (100.0%)
+GBSs            Tokyo, New-York, Sao-Paulo, Sydney   (min elevation 20.0°)
+Link rates      ISL 1 Mbps, GBS aggregate 500 Mbps
+Simulation      18000 s (5.0 h, 3.1 orbits) at dt = 30 s -> 601 slots
+Depths D        [2, 4, 8, 16]  payload b_q = 176 B, 352 B, 704 B, 1408 B
+
+── Contact windows ──────────────────────────────────────────
+  Tokyo       875 windows   avg   259 s   >=1 sat visible 100.0% of slots
+  New-York    1336 windows   avg   227 s   >=1 sat visible 100.0% of slots
+  Sao-Paulo   646 windows   avg   265 s   >=1 sat visible 100.0% of slots
+  Sydney      814 windows   avg   261 s   >=1 sat visible 100.0% of slots
+
+── Task load K ──────────────────────────────────────────────
+  64 tasks, 12,809,971 images total, N_k ~ U(100,000, 300,000)
+  offered load at depth-16: 144.3 Gbit  vs  total GBS capacity 36000.0 Gbit  (utilization 0.00)
+  encoder pipeline: 81 img/s per satellite (12.34 ms/img measured)
+
+── Scheduler comparison (maximize images transmitted / utility) ─
+  scheduler                images  delivery%   utility  on-time%   viol%  dropped
+  mpc                  11,691,325      91.3%     45.45     88.1%   45.3%        0
+  greedy-adaptive      12,809,971     100.0%     37.83     81.5%   56.2%        0
+  greedy-fixed-2       12,809,971     100.0%     30.53     88.7%   43.8%        0
+  greedy-fixed-4       12,809,971     100.0%     36.58     88.7%   43.8%        0
+  greedy-fixed-8       12,809,971     100.0%     41.41     88.6%   43.8%        0
+  greedy-fixed-16      12,809,971     100.0%     37.83     81.5%   56.2%        0
+  mpc-congestion       11,629,728      90.8%     45.68     87.6%   50.0%        0
+  mpc-hier             10,624,828      82.9%     40.42     76.8%   65.6%       36
+  mpc-2level           11,779,932      92.0%     45.66     88.7%   43.8%        0
+  mpc-hier-route       10,823,044      84.5%     40.41     77.1%   70.3%       31
+
+── Unified utility decomposition ────────────────────────────
+  quality source: s_q = downstream mIoU [provisional-anchored] :: PROVISIONAL - NOT MEASURED (placeholder until the FLAIR segmentation sweep lands; see rq-vae/downstream/)
+  mode=unified  weights  omega_Q=1.0 omega_T=0.25 omega_E=0.05 omega_F=0.1  segments=4
+  s_q = 2:0.6500  4:0.7700  8:0.8700  16:0.9400
+  scheduler           total  quality   -tardy   -cost   +fair   u_min   jain   enc kJ   tx kJ
+  mpc                45.451   42.743   -0.097  -2.128   4.932  0.7707 0.9977   4328.1   24.42
+  greedy-adaptive    37.826   42.184   -1.502  -2.350  -0.506 -0.0791 0.9705   4742.3   28.86
+  greedy-fixed-2     30.534   29.973   -0.813  -1.322   2.695  0.4211 0.9923   4742.3    3.61
+  greedy-fixed-4     36.576   35.507   -0.813  -1.469   3.351  0.5236 0.9937   4742.3    7.21
+  greedy-fixed-8     41.412   40.117   -0.814  -1.763   3.872  0.6050 0.9944   4742.3   14.43
+  greedy-fixed-16    37.826   42.184   -1.502  -2.350  -0.506 -0.0791 0.9705   4742.3   28.86
+  mpc-congestion     45.679   43.017   -0.097  -2.174   4.932  0.7707 0.9981   4305.3   25.76
+  mpc-hier           40.417   38.531   -0.229  -1.642   3.757  0.5870 0.9879   3933.3   14.37
+  mpc-2level         45.661   43.010   -0.105  -2.176   4.932  0.7707 0.9978   4360.9   25.57
+  mpc-hier-route     40.407   38.732   -0.282  -1.668   3.625  0.5664 0.9891   4006.7   15.33
+  (Jain is a DIAGNOSTIC only -- it is a ratio of quadratics and
+   is not MILP-representable, so u_min is what gets optimized.)
+
+── Routing ──────────────────────────────────────────────────
+  scheduler          hops  delay ms  paths/(k,t)  frozen ok @exec  @horizon  route LPs  route s
+  mpc                   -         -            -           static         -          0     0.00
+  greedy-adaptive       -         -            -           static         -          0     0.00
+  greedy-fixed-2        -         -            -           static         -          0     0.00
+  greedy-fixed-4        -         -            -           static         -          0     0.00
+  greedy-fixed-8        -         -            -           static         -          0     0.00
+  greedy-fixed-16       -         -            -           static         -          0     0.00
+  mpc-congestion        -         -            -           static         -          0     0.00
+  mpc-hier              -         -            -           static         -          0     0.00
+  mpc-2level         12.1     74.08         1.52              n/a       n/a        124     3.43
+  mpc-hier-route        -         -            -             7.6%      4.9%          0     0.00
+  (frozen ok @exec = a route frozen for a macro-epoch was still
+   feasible at the slot it was USED; @horizon = across the whole
+   planning lookahead. The price of the hierarchical coupling on
+   a MOVING constellation -- GSL contacts last only ~230-265 s.)
+
+── Delay / depth mix ────────────────────────────────────────
+  mpc              mean delay    2273s  p95    3247s  depth mix 2:0 4:0 8:9 16:55
+  greedy-adaptive  mean delay    2745s  p95    4041s  depth mix 2:0 4:0 8:0 16:64
+  greedy-fixed-2   mean delay    2453s  p95    3536s  depth mix 2:64 4:0 8:0 16:0
+  greedy-fixed-4   mean delay    2453s  p95    3536s  depth mix 2:0 4:64 8:0 16:0
+  greedy-fixed-8   mean delay    2453s  p95    3536s  depth mix 2:0 4:0 8:64 16:0
+  greedy-fixed-16  mean delay    2745s  p95    4041s  depth mix 2:0 4:0 8:0 16:64
+  mpc-congestion   mean delay    2272s  p95    3222s  depth mix 2:0 4:0 8:2 16:62
+  mpc-hier         mean delay    2928s  p95    3476s  depth mix 2:2 4:10 8:28 16:24
+  mpc-2level       mean delay    2110s  p95    3030s  depth mix 2:0 4:0 8:5 16:59
+  mpc-hier-route   mean delay    2914s  p95    3438s  depth mix 2:2 4:10 8:28 16:24
+
+── MPC solve-time instrumentation ───────────────────────────
+  mpc               121 solves   mean   156.9 ms   p95   903.2 ms   max  2537.8 ms   total   19.0 s
+  mpc-congestion    329 solves   mean   156.2 ms   p95  1044.0 ms   max  2141.6 ms   total   51.4 s
+  mpc-hier          121 solves   mean    45.4 ms   p95   240.5 ms   max   570.2 ms   total    5.5 s
+  mpc-2level        369 solves   mean   123.6 ms   p95   558.7 ms   max  2504.7 ms   total   45.6 s
+  mpc-hier-route    121 solves   mean    43.3 ms   p95   221.2 ms   max   559.1 ms   total    5.2 s
+
+Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,
+tasks.csv, timeline_*.csv, task_outcomes_*.csv, solve_log_*.csv,
+plots/*.png, viewer.html (interactive simulator)
+==========================================================================
+
+==========================================================================
+Offline HiGHS upper bound (routing-relaxed: only the per-window GBS aggregate
+budget is enforced; ISL/GSL rows dropped -- valid because they never bind at
+the committed rates, and dropping rows can only raise the bound further)
+==========================================================================
+analytic ceiling (everything at best depth, instantly):    50.58
+LP bound   (continuous depth, 5-slot windows, 52289 vars):    46.53   (0.6s, status=0)
+LP bound   (fairness term removed, both at 10-slot windows):    41.27   (fairness contributes +5.41 of 46.68)
+MILP bound (integral depth, full resolution, time_limit=120s): incumbent    46.06  dual    46.06  mip_gap=0.000   (10.5s, status=0)
+
+scheduler          utility  gap to bound
+  mpc                  45.45          1.3%
+  greedy-adaptive      37.83         17.9%
+  greedy-fixed-2       30.53         33.7%
+  greedy-fixed-4       36.58         20.6%
+  greedy-fixed-8       41.41         10.1%
+  greedy-fixed-16      37.83         17.9%
+  mpc-congestion       45.68          0.8%
+  mpc-hier             40.42         12.3%
+  mpc-2level           45.66          0.9%
+  mpc-hier-route       40.41         12.3%
+==========================================================================

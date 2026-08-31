@@ -21,6 +21,8 @@ of oec_sim works without it (see run_all.py's plots/viewer guard pattern).
 import numpy as np
 
 from . import config as C
+from . import routing as R
+from . import utility
 from .schedulers import _edge_keys, _cap_bits, _record_delivery
 
 try:
@@ -60,6 +62,7 @@ class OECDepthEnv:
         self.topo = topo
         self.isl_index = {(min(a, b), max(a, b)): l
                           for l, (a, b) in enumerate(topo.isl_pairs)}
+        self.static = R.StaticRouter(topo)
         self._seed = seed
         self._tasks_override = tasks
         self.reset(seed=seed)
@@ -70,6 +73,8 @@ class OECDepthEnv:
             self._seed = seed
         if self._tasks_override is not None:
             self.tasks = self._tasks_override
+            for k in self.tasks:
+                utility.reset(k)
         else:
             with C.config_override(RNG_SEED=self._seed if self._seed is not None
                                    else C.RNG_SEED):
@@ -130,7 +135,13 @@ class OECDepthEnv:
             return
         for key in keys:
             self._residual[key] -= y * img_bits
-        _record_delivery(k, self.t, y)
+        # Charge the real propagation delay, as the MPC and greedy paths do.
+        # Passing no delay here scored RL deliveries as if propagation were
+        # instantaneous, which inflated their freshness and made the PPO
+        # baseline look better than the schedulers it is compared against.
+        _record_delivery(k, self.t, y,
+                         route_delay_s=self.static.delay_s(
+                             self.t, k.dst_gs, k.src_sat))
 
     def _obs(self):
         if self.t >= C.N_SLOTS or not self._active_queue:

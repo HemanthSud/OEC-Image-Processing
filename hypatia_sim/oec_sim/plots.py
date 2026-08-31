@@ -12,6 +12,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from . import config as C
+from . import utility
 
 # fixed categorical assignment (entity -> hue, never cycled)
 SCHED_COLOR = {
@@ -26,6 +27,8 @@ SCHED_COLOR = {
     'greedy-fixed-4':  '#4a3aa7',
     'greedy-fixed-8':  '#e34948',
     'greedy-fixed-16': '#e87ba4',
+    'mpc-2level':      '#00857a',
+    'mpc-hier-route':  '#b5590f',
 }
 GRID = dict(color='#e6e6e2', linewidth=0.8)
 plt.rcParams.update({
@@ -208,4 +211,114 @@ def make_all(topo, results):
     fig.savefig(os.path.join(out, 'delay_cdf.png'), dpi=150)
     plt.close(fig)
 
-    print(f'  wrote 6 figures -> {os.path.relpath(out)}/')
+    n_fig = 6
+
+    # 7 — where each scheduler's unified utility actually comes from
+    if C.UTIL_MODE != 'legacy':
+        names = list(results)
+        terms = {n: utility.run_utility(results[n]['tasks'])[1] for n in names}
+        fair = {n: utility.run_utility(results[n]['tasks'])[1]['fairness']
+                for n in names}
+        fig, ax = plt.subplots(figsize=(8, 4.2))
+        x = np.arange(len(names))
+        q = np.array([terms[n]['quality'] for n in names])
+        td = np.array([-terms[n]['tardiness'] for n in names])
+        co = np.array([-terms[n]['cost'] for n in names])
+        fr = np.array([fair[n] for n in names])
+        ax.bar(x, q, color='#1baf7a', label='quality  $s_q\\hat G_k$')
+        ax.bar(x, fr, bottom=q, color='#2a78d6', label='fairness bonus')
+        ax.bar(x, td, color='#e34948', label='tardiness')
+        ax.bar(x, co, bottom=td, color='#c77b1a', label='resource cost')
+        tot = [utility.run_utility(results[n]['tasks'])[0] for n in names]
+        ax.plot(x, tot, 'ko-', ms=5, lw=1.4, label='total')
+        ax.set_xticks(x); ax.set_xticklabels(names, rotation=30, ha='right',
+                                             fontsize=8)
+        ax.set_ylabel('utility')
+        ax.set_title('Unified utility decomposition — what each scheduler '
+                     'is actually winning on', fontsize=10)
+        ax.axhline(0, color='#1a1a19', lw=0.8)
+        ax.grid(**GRID)
+        ax.legend(frameon=False, fontsize=8, ncol=4, loc='upper center',
+                  bbox_to_anchor=(0.5, -0.28))
+        fig.tight_layout()
+        fig.savefig(os.path.join(out, 'utility_decomposition.png'), dpi=150,
+                    bbox_inches='tight')
+        plt.close(fig)
+        n_fig += 1
+
+    # 8 — the coupling comparison: utility against what it costs to solve
+    cpl = [n for n in results if n in ('mpc', 'mpc-2level', 'mpc-hier',
+                                       'mpc-hier-route', 'mpc-congestion')]
+    if len(cpl) >= 2:
+        fig, ax = plt.subplots(figsize=(7.0, 4.4))
+        pts = []
+        for n in cpl:
+            log = results[n].get('solve_log') or []
+            pts.append((sum(x['wall_s'] for x in log),
+                        results[n]['hist']['utility'][-1], n))
+        pts.sort()
+        # Several couplings land almost on top of each other (that IS the
+        # result), so stagger the labels and outline the markers rather than
+        # letting them overprint into an unreadable blob.
+        for i, (wall, u, n) in enumerate(pts):
+            ax.scatter(wall, u, s=110, color=SCHED_COLOR.get(n, '#6f6e66'),
+                       zorder=3, edgecolor='white', linewidth=1.2)
+            dx, dy = (9, 7) if i % 2 == 0 else (9, -13)
+            ax.annotate(n, (wall, u), textcoords='offset points',
+                        xytext=(dx, dy), fontsize=8,
+                        color=SCHED_COLOR.get(n, '#6f6e66'))
+        ax.margins(x=0.18, y=0.18)
+        ax.set_xlabel('total solve time (s)')
+        ax.set_ylabel('realized unified utility')
+        ax.set_title('Two-MPC couplings: utility vs. cost to solve\n'
+                     '(cheap hierarchical family sits ~5 points lower — on '
+                     'admission, not routing)', fontsize=9)
+        ax.grid(**GRID)
+        fig.tight_layout()
+        fig.savefig(os.path.join(out, 'coupling_comparison.png'), dpi=150)
+        plt.close(fig)
+        n_fig += 1
+
+    # 9 — why downstream metrics matter: quality vs payload
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
+    depths = sorted(C.DEPTHS)
+    bq = [C.PAYLOAD_B[q] for q in depths]
+    lp = [C.UTILITY[q] for q in depths]
+    ax.plot(bq, [v / max(lp) for v in lp], 'o-', color='#6f6e66',
+            label='$1-$LPIPS (normalized)')
+    try:
+        tbl = utility.load_quality_table()
+        prov = 'PROVISIONAL' in str(tbl.get('source', ''))
+        for anchor, style, col in (('s', '-', '#2a78d6'),
+                                   ('s_ratio', '--', '#c77b1a')):
+            d = tbl.get(anchor)
+            if not d:
+                continue
+            # the table may be keyed by int or by str depending on whether it
+            # came from JSON or from the config fallback
+            vals = [d.get(q, d.get(str(q))) for q in depths]
+            if any(v is None for v in vals):
+                continue
+            lbl = ('mIoU (floor-anchored)' if anchor == 's'
+                   else 'mIoU (ratio-anchored)')
+            if prov:
+                lbl += ' [PROVISIONAL]'
+            ax.plot(bq, [float(v) for v in vals], 'o' + style, color=col,
+                    label=lbl)
+    except Exception:
+        pass
+    ax.set_xscale('log'); ax.set_xlabel('payload $b_q$ (bytes/image, log)')
+    ax.set_ylabel('quality term $s_q$')
+    ax.set_ylim(0, 1.05)
+    ax.set_title('Quality vs. payload: a reconstruction proxy barely varies,\n'
+                 'a downstream task does', fontsize=9)
+    for q, x, y in zip(depths, bq, [v / max(lp) for v in lp]):
+        ax.annotate(f'q={q}', (x, y), textcoords='offset points',
+                    xytext=(0, 8), ha='center', fontsize=7, color='#6f6e66')
+    ax.grid(**GRID); ax.legend(frameon=False, fontsize=8, loc='lower right')
+    fig.tight_layout()
+    fig.savefig(os.path.join(out, 'quality_curve.png'), dpi=150)
+    plt.close(fig)
+    n_fig += 1
+
+    print(f'  wrote {n_fig} figures -> {os.path.relpath(out)}/')

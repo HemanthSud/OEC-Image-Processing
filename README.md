@@ -96,15 +96,103 @@ formulation (*OEC RQ-NAC*). Every symbol maps 1:1 to code (`config.py`):
 | GBSs G | Tokyo, New York, São Paulo, Sydney (Hypatia top-100 city list); GSL feasible at elevation ≥ 20°, 2 Mbps aggregate per GBS |
 | Links E_t, C_ij(t) | +Grid ISLs gated per 30 s slot by a line-of-sight test (segment must clear Earth + 80 km atmosphere) and 5,016 km max range; 100 Mbps per ISL. All 2,312 Kuiper +Grid links pass — unlike the legacy small scenario's 120°-apart links, whose chords pass ~2,900 km below the surface (the issue Xuanhao flagged) |
 | Tasks K | 8 AOIs (wildfires, Amazon, Sahel, …), imaging at elevation ≥ 40°; 64 tasks / 12.8M images over the window, weights w_k ∈ {1,2,3}, soft deadlines with freshness decay |
-| Depths D = {2,4,8,16} | Utilities u_q = 1 − LPIPS_q **measured** from the FLAIR depth-16 model truncated to q stages: 0.443 / 0.469 / 0.483 / 0.496; payload b_q = 88·q B (8×8 latent); encoder 12.34 ms/image |
-| Routing | Static: per-slot shortest-delay Dijkstra from each GBS. Predictive (`route_mode='predictive'`, `oec_sim/routing.py`): MPC predicts per-edge congestion from its own plan, Dijkstra re-solves per horizon step, iterated to a damped fixed point (Dr. Liu's directive) |
+| Depths D = {2,4,8,16} | Quality s_q — **downstream FLAIR segmentation mIoU** on the depth-q reconstruction (`--utility unified`), or the legacy reconstruction proxy u_q = 1 − LPIPS_q = 0.443 / 0.469 / 0.483 / 0.496 (`--utility legacy`); payload b_q = 88·q B (8×8 latent); encoder 12.34 ms/image |
+| Utility | Unified and term-weighted (`oec_sim/utility.py`): quality × **concave** coverage × freshness, minus tardiness and resource cost, plus a maximin fairness floor. One definition shared by the realized score, the flat MPC, both hierarchical levels and the offline bound — these five used to disagree |
+| Routing | Static per-slot Dijkstra; predictive congestion-weighted Dijkstra (`route_mode='predictive'`); or a genuine **routing MPC** — a multicommodity-flow LP over candidate path sets — coupled to the depth MPC either as a peer (`mpc-2level`) or hierarchically (`mpc-hier-route`) |
 
 Window: 5 h (3.1 orbits) at 30 s slots. Run with `python3 -m oec_sim.run_all`
 (~25 s; add `--hier --oracle` for the hierarchical scheduler and HiGHS bound,
 ~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
 notation.
 
+### Unified Utility — one number that balances all the factors
+
+Utility used to be defined in **five places that disagreed**. The *reported*
+score was `Σ_k Σ_t w_k · φ_k · u_q · Δimages/N_k` — no tardiness, no cost, no
+fairness. The flat MPC objective added a backlog bonus and a tardiness penalty;
+the hierarchical upper level had neither; its lower level swapped the bonus for
+a backpressure term; the offline bound had a third combination. Timeliness,
+coverage and depth mix lived in side tables, so no single number said whether a
+scheduler was actually *good*.
+
+`oec_sim/utility.py` is now the single source of truth for all five:
+
+```
+U_k = w̄_k [ ω_Q · s_{q_k} · Ĝ_k  −  ω_T · T_k  −  ω_E · C_k ]
+U   = Σ_k U_k  +  ω_F · |K| · min_k Û_k
+```
+
+| term | what it is | how it stays MILP-linear |
+|---|---|---|
+| `s_q` | **downstream segmentation mIoU** at depth q (was 1 − LPIPS) | table lookup |
+| `Ĝ_k` | coverage gain, **concave** in delivered fraction, each image weighted by the freshness at which it arrived | piecewise-linear segments with decreasing slopes; maximizing a concave separable function needs **no binaries and no SOS2** — the LP fills segment 1 before segment 2 on its own |
+| `T_k` | tardiness, clipped at one deadline-unit | the clip is on a *coefficient* (arrival times are data) |
+| `C_k` | resource cost: payload-proportional + per-image encode | constant per (k,q) |
+| `min_k Û_k` | fairness floor, weight-relative | one column + \|K\| rows; **Jain is reported but not optimized** — it is a ratio of quadratics, so optimizing it would leave the offline bound with nothing valid to compare against |
+
+**`--utility legacy` is the default and reproduces every committed number
+exactly** — it is a parameter setting (ω_T = ω_E = ω_F = 0, one unit coverage
+segment, s_q = 1 − LPIPS), not a code branch. `run_all --check-golden` enforces
+this against `oec_scenario/golden/legacy_summary.json` and exits non-zero on
+drift.
+
+**What the unified score changes.** The point of grounding quality in a
+downstream task is that depth choice stops being degenerate:
+
+| | best fixed depth | mpc | mpc's margin | gap to HiGHS bound |
+|---|---|---|---|---|
+| legacy utility | 64.15 (`fixed-8`) | **64.95** | +1.2% | 0.4% |
+| unified utility | 41.42 (`fixed-8`) | **44.56** | **+7.6%** | 2.5% |
+
+Under the old single-factor score the MPC was barely distinguishable from
+picking depth 8 and never thinking again. Under the unified score it wins by
+6× the margin — because coverage is now concave, lateness is charged for, and
+the quality term actually varies with depth.
+
+Concretely, what "concave coverage" buys: a task's **first 50% of images earns
+79.3% of its full value** (it is exactly 50% under the legacy linear score), so
+covering many AOIs partially beats saturating one — which is the behaviour you
+actually want from an imaging constellation, and which the old score had no way
+to express.
+
+Two findings fell out of building it:
+
+**Encode energy dominates downlink by ~230×, and encode is depth-independent.**
+`t_enc` = 12.34 ms was measured at *both* 8×8×1 and 8×8×8 (σ ≈ 0.03–0.05 ms).
+Per image that is 0.370 J of encode against 2.25 × 10⁻³ J of downlink at q=16;
+over a full run, 4,522 kJ vs 19.65 kJ. So a literal Joule-denominated term is
+nearly constant in q and **cannot** drive depth choice — depth selection here
+is a *bandwidth* decision, not an energy one. The objective therefore uses a
+normalized cost whose shape is physical and whose scale is a stated policy
+weight (ω_E = 0.05, a tie-breaker); absolute Joules are reported as accounting
+only. The 30 W / 20 W power figures are **assumed** (Jetson AGX Orin mid-band;
+the A6000 the timing came from is not a flight part) and labelled as such.
+
+**The fairness floor buys +8.5% for the worst-served task at a cost of 1.4% of
+aggregate utility**, and saturates by ω_F = 0.1 — which is why that is the
+default. It also exposes something the old score hid completely:
+`greedy-fixed-16` has `u_min = 0.0000` and Jain 0.4272, i.e. it wins its (poor)
+utility partly by *starving tasks outright*. Nothing in the single-factor
+number showed that.
+
+The bound carries every new term, relaxed optimistically, and `oracle.report`
+now **asserts** `bound ≥ realized` per scheduler. That check earned its keep
+immediately — it caught the offline bound double-counting already-realized
+utility in its fairness constant, which had pushed the LP bound (51.16) *above*
+the analytic ceiling (50.58). Fixed; the ordering is now ceiling 50.58 > LP
+46.22 > MILP dual 45.72 ≥ realized 44.56.
+
+> ⚠️ Unified-mode numbers on this page currently use a **provisional** s_q
+> table (`config.QUALITY_TABLE_FALLBACK`), because the FLAIR segmentation
+> sweep runs on the NCSU server. Every run using it prints
+> `PROVISIONAL - NOT MEASURED` in `summary.txt`. The legacy numbers are
+> measured and unaffected.
+
 ### MPC Scheduler vs. Fixed Depths vs. Hierarchical MPC
+
+> The table below is **legacy utility mode** (`--utility legacy`, the default)
+> and is exactly reproducible; those values are *not* comparable to the
+> unified-utility numbers above, which are on a different scale.
 
 The flat scheduler is a deterministic rolling-horizon MPC: HiGHS MILP (via
 scipy) over an H = 60-slot (30 min) horizon, executes the first slot,
@@ -159,9 +247,62 @@ its per-image on-time rate collapses to 31.3% and p95 delay balloons to
 `mpc-hier`'s 16 dropped tasks are exactly the "rotting" ones it gave up on
 rather than letting them silently miss every deadline forever.
 
-What's *not* here yet: these measure timeliness, not whether the delivered
-image was actually still useful for its task — see the downstream-metrics
-item in Pending.
+These measure timeliness, not whether the delivered image was still *useful*
+for its task. That gap is what the unified utility above closes: timeliness is
+now folded into the single number rather than living only in this side table,
+and the quality term is grounded in downstream segmentation rather than pixel
+fidelity.
+
+### Downstream Task Utility — segmentation on reconstructions
+
+The pipeline that replaces `u_q = 1 − LPIPS_q` with real downstream
+performance lives in `rq-vae/downstream/`. It is **server-side** (it needs the
+RQ-VAE checkpoint, the FLAIR GeoTIFFs and CUDA) and is written but not yet run.
+
+**Hybrid 5-band design.** RQ-VAE compresses RGB only, while FLAIR's baseline
+segmenter takes RGB + NIR + Elevation. Each output raster is therefore
+
+```
+bands 1-3 = the depth-q RECONSTRUCTION
+bands 4-5 = the ORIGINAL NIR and Elevation, copied through untouched
+```
+
+which keeps IGNF's published 5-band U-Net/ResNet34 checkpoint usable **with no
+segmentation training**, and is physically honest — only the optical bands went
+through the codec.
+
+**Anchoring is the whole ballgame.** Two conditions are run beyond
+q ∈ {1,2,4,8,16}:
+
+| condition | what it gives |
+|---|---|
+| `--depth orig` | `mIoU_ref` — the uncompressed reference. Also the **checkpoint gate**: it must reproduce the published 0.5443, or the class-weight vector / model provider / normalization is wrong and every later number is meaningless |
+| `--depth blank` | `mIoU_floor` — RGB bands filled with the dataset means, so the segmenter runs on **NIR + Elevation alone** |
+
+`s_q = (mIoU_q − mIoU_floor) / (mIoU_ref − mIoU_floor)`. The decision-theoretic
+zero for a scheduler is not "mIoU = 0" but *what you get by not delivering the
+image at all* — which is exactly the blanked condition. Anchoring there instead
+of at zero is the difference between a table that barely varies and one where
+depth choice matters. Both anchorings are written to `quality_table.json`, so
+the choice stays visible and reversible. **If the spread is still narrow after
+floor anchoring, that is the finding** — to be reported, not tuned away.
+
+```bash
+# on the server, in tmux
+tmux new -s flair_sweep
+MAX_SAMPLES=500 ./downstream/run_depth_sweep.sh   # ~1 h subset first
+./downstream/run_depth_sweep.sh                   # full 7,050, ~8-10 h
+```
+
+One condition at a time, deleting reconstructions after harvest, so peak disk
+stays ~6 GB rather than the ~36 GB all six would need at once
+(`recon_to_geotiff.py` also refuses to start below `--min-free-gb`; this box
+has hit 100% before). `metrics.py` is the bottleneck at ~1 h/condition — a
+serial `confusion_matrix` over 262k pixels × 7,050 patches.
+
+Until it lands, `config.QUALITY_TABLE_FALLBACK` supplies a clearly-labelled
+**provisional** table and every run using it prints `PROVISIONAL - NOT
+MEASURED` in `summary.txt`.
 
 ### Offline Optimality Bound (HiGHS)
 
@@ -179,6 +320,134 @@ those rows never bind in the real schedule either — see below):
 **MPC lands at 64.95 — 0.4% off the true optimum.** That's the single
 strongest number from this pass: the flat MPC isn't "pretty good," it's
 essentially solving the problem optimally in this regime.
+
+### Two-MPC Split: routing MPC + depth MPC, built both ways
+
+*"Hierarchical MPC — one MPC to select the best path, another one [for the
+rest]."* `hier.py` was **named** hierarchical but split admission/budget from
+depth and routed statically at *both* levels, so the routing/depth split Dr.
+Liu asked for did not exist. It now exists in two forms, and both are reported.
+
+| | `mpc-2level` (peer) | `mpc-hier-route` (hierarchical) |
+|---|---|---|
+| routing solver | multicommodity-flow **LP** over per-(task, path, τ) flows | same LP, in bits, over macro-windows |
+| cadence | every re-plan, iterated with the depth MILP to a damped fixed point | once per 10-min macro-epoch, path set then **frozen** |
+| coupling | demand ↔ mix, MSA damping, keep-best-iterate | `Directive.routes` handed down, like the existing budget directive |
+| how multipath reaches the depth MILP | capacity coefficients become `b_q·8·θ_e` — fractional edge **shares**, so no path variables are added to the depth problem | same |
+
+Both reduce exactly to their baselines by construction, and that is tested:
+`MPC2L_ITERS=1, MPC_ROUTE_NPATHS=1` reproduces `mpc` bit-for-bit, and
+`HIER_ROUTE_ON=False` reproduces `mpc-hier` bit-for-bit.
+
+**Results** (`fabric-limited`, unified utility, ISL 1 Mbps — the regime where
+29.6% of links are oversubscribed and routing can actually matter):
+
+| scheduler | utility | gap to bound (46.06) | solve time | delivery% | on-time% | paths/(k,t) |
+|---|---|---|---|---|---|---|
+| `mpc-congestion` | **45.68** | 0.8% | 54.9 s | 90.8% | 87.6% | 1 |
+| `mpc-2level` | **45.66** | 0.9% | 52.5 s | **92.0%** | **88.7%** | **1.51** |
+| `mpc` | 45.45 | 1.3% | 21.4 s | 91.3% | 88.1% | 1 |
+| `mpc-hier` | 40.42 | 12.2% | **6.3 s** | 82.9% | 76.8% | 1 |
+| `mpc-hier-route` | 40.41 | 12.3% | **5.5 s** | 84.5% | 77.1% | frozen route usable at execution only **7.6%** of the time |
+
+**The pick: `mpc-2level`** — and the pre-registered rule made that call, not
+hindsight. The rule, written before any coupling was run, was: *recommend the
+cheaper `mpc-hier-route` unless `mpc-2level` beats it by more than 1.0 utility
+point (≈1.5%) or 1.0 point of bound gap, in at least 4 of the load regimes.*
+The default favoured the cheap coupling deliberately — `mpc-hier-route` solves
+~10× faster, and routes across a 1,156-satellite fabric are not realistically
+re-planned every 30 s with a ground solver in the loop.
+
+It loses anyway, and not narrowly — in **5 of 5 regimes**, by 4.4 to 5.6
+points. Committed sweep, `oec_scenario/sweep/results_routing.csv`, 5 ISL rates
+× 3 seeds, mean over seeds (the rule was drafted for a 6-point grid and is
+applied as ≥4 of 5):
+
+| ISL Mbps | `mpc` | `mpc-2level` | `mpc-hier` | `mpc-hier-route` | 2level − hier-route |
+|---|---|---|---|---|---|
+| 0.50 | 40.88 | **41.23** | 36.03 | 36.18 | **+5.04** |
+| 0.75 | 41.87 | **42.13** | 37.10 | 36.93 | **+5.19** |
+| 1.00 | 43.71 | **43.92** | 37.96 | 38.37 | **+5.55** |
+| 1.50 | 44.00 | 44.01 | 38.56 | 39.64 | **+4.37** |
+| 2.00 | 44.03 | 44.03 | 39.59 | 38.90 | **+5.13** |
+
+**But that margin is not about routing at all**, and the sweep is what makes
+that clear. Broken out against each coupling's own baseline:
+
+| ISL Mbps | `mpc-2level` − `mpc` | `mpc-hier-route` − `mpc-hier` |
+|---|---|---|
+| 0.50 | +0.344 | +0.156 |
+| 0.75 | +0.258 | −0.171 |
+| 1.00 | +0.211 | +0.405 |
+| 1.50 | +0.003 | +1.082 |
+| 2.00 | +0.000 | −0.694 |
+
+Two things follow, and both are worth more than the headline:
+
+1. **The routing MPC buys at most +0.84%**, only where the fabric is genuinely
+   scarce, and **exactly nothing** once ISL ≥ 1.5 Mbps — where it converges to
+   the flat MPC because there is no contention left to route around. It costs
+   37–61 s of solve time against `mpc`'s ~22 s to do it. A routing *optimizer*
+   is simply not worth much here over a good routing *heuristic*:
+   `mpc-congestion`, plain congestion-weighted Dijkstra, matches it (45.68 vs
+   45.66 at the operating point).
+2. **Route freezing contributes nothing**: `mpc-hier-route` − `mpc-hier` swings
+   both signs and averages ≈ +0.16, i.e. noise — exactly what a frozen route
+   that is usable under 8% of the time predicts.
+
+So the honest reading of the 5-point gap is that it is **admission and drop**,
+not routing: the hierarchical family explicitly gives up 36 tasks, and that,
+not its path choice, is what costs it. `mpc-2level` is the right pick under the
+rule, but the result that actually matters for the paper is that **routing is
+not where the utility is in this system** — depth selection and admission are.
+
+**Why the hierarchical coupling loses is the more interesting half.** It isn't
+tuning. A frozen path is pinned to *specific satellites*, and GSL contact
+windows here average 227–265 s, so the satellite serving a given GBS turns
+over faster than any useful planning epoch. Measured survival of a route
+frozen at epoch start:
+
+| lookahead | 0 s | 30 s | 150 s | 300 s | 570 s |
+|---|---|---|---|---|---|
+| still feasible | **14.4%** | 11.7% | 12.2% | 3.3% | 0.0% |
+
+(that breakdown is from a 250-slot diagnostic; over the full 601-slot run the
+executed-slot figure is **7.6%**, and `summary.txt` reports it alongside the
+across-the-horizon rate, 4.9%, since the two answer different questions.)
+
+Even at the *executed* slot, with zero lookahead, the frozen route is usable
+under 15% of the time, and shortening the epoch to 2 minutes does not help
+(90.6% fallback vs 92.8%). **Freezing concrete paths does not survive a LEO
+fabric.** The honest
+caveat: this is a negative result about freezing *concrete paths*. Freezing a
+more abstract decision — a serving-GBS assignment, or a route class — might
+survive, and that is now on the Pending list rather than claimed here.
+
+**Two things worth stating plainly about the winner, too.** First, the routing
+MPC beats the flat MPC by only **+0.46%** (45.66 vs 45.45) even in a
+deliberately fabric-limited regime — and `mpc-congestion`, the far simpler
+predicted-cost Dijkstra, matches it (45.68) at the same cost. The routing
+*optimizer* is not buying much over a well-chosen routing *heuristic*. Second,
+the ~5-point gap between the flat/peer family (~45.5) and the hierarchical
+family (~40.4) is about **admission and drop**, not routing at all —
+`mpc-hier` gives up 36 tasks explicitly.
+
+Two implementation traps produced convincing-looking null results before being
+caught, both recorded in `FORMULATION.md` because they generalize:
+
+1. **Circular demand.** Deriving the routing LP's demand from the depth MILP's
+   plan is circular — that plan was already made feasible against the static
+   paths, so the LP sees no contention and re-derives Dijkstra. `mpc-2level`
+   came out bit-for-bit equal to `mpc` on a fabric with 30% of links
+   oversubscribed. The demand must be what a task *wants* to send.
+2. **A big-M that wasn't.** The hierarchical LP's shortfall penalty was divided
+   by 1e9 while the flow cost was not, making *not routing* ~5×10⁵ times
+   cheaper than routing; the LP shorted everything, returned zero routes, and
+   `mpc-hier-route` silently degenerated into `mpc-hier`.
+
+Both look identical from the outside — "no difference between couplings" —
+which is why `summary.txt` now reports paths-per-decision and frozen-route
+survival, not just utility.
 
 ### Predicted-Cost Routing (Dr. Liu's directive)
 
@@ -225,9 +494,16 @@ utility) — a first pass, not exhaustive.
 
 ![Utility vs. GBS downlink rate: MPC and the hierarchical MPC track the upper envelope across load regimes, while the best fixed depth crosses over between them](hypatia_sim/oec_scenario/plots/sweep_utility_vs_load.png)
 
+> Re-run this pass with the full column set (`utility_quality`, `u_min`,
+> `jain`, `n_route_fallbacks`, `solve_wall_s`) and with `mpc-hier` included.
+> **All 180 previously-committed rows came back bit-identical** on utility,
+> images delivered, delivery fraction and violation fraction — a regression
+> check across the whole grid, not just the single `--check-golden` scenario.
+
 `oec_sim/sweep.py` replaces what used to be a single manual congested run
 that was never saved to the repo. Full grid — 6 GBS rates × 5 seeds × 6
-schedulers, **180 rows**, committed at `oec_scenario/sweep/results.csv`:
+schedulers (+ `mpc-hier`), **210 rows**, committed at
+`oec_scenario/sweep/results.csv`:
 
 | GBS rate | best fixed depth | best-fixed utility | mpc utility |
 |---|---|---|---|
@@ -244,6 +520,23 @@ point where there's no scarcity to exploit. No cherry-picking — this is the
 mean over all 5 seeds per rate.
 
 ### RL Baseline (PPO) — Trained and Evaluated
+
+> These numbers are **legacy utility mode**. The trained `ppo_oec.zip` optimized
+> the old single-factor reward, so it is stale under `--utility unified`;
+> retraining is on the Pending list.
+>
+> Two comparison-fairness bugs in the RL path were fixed this pass, both of
+> which quietly favoured the RL baseline over the schedulers it is measured
+> against. (1) `rl_env._execute_one` recorded deliveries with **no propagation
+> delay**, while the MPC and greedy paths both charge the real route delay — so
+> RL deliveries were credited with better freshness than they earned. The
+> effect turns out to be tiny (16.16335 → 16.16308, 0.0017%), because ~50-75 ms
+> of propagation is negligible against a 30 s slot and a 300 s freshness
+> constant — a correctness fix, not a result. (2) `RLScheduler.run()` built its
+> own history dict and summed `delivered_utility` directly, bypassing
+> `utility.run_utility`, so under `--utility unified` it would have omitted the
+> fairness term that every other scheduler's total includes. Both now match the
+> rest of the fleet.
 
 Dr. Liu asked for an MPC-vs-RL comparison. `oec_sim/rl_env.py` implements a
 Gymnasium environment (`Discrete(6)`: commit one of 4 depths, defer, or
@@ -293,6 +586,13 @@ to D={2,4,8,16} (taken under the older {1,2,4,8} depth set); regenerate with
 Three viewers, all showing the same verified topology (the drawn ISLs, GSLs,
 and routes were checked node-for-node against `topology.py`'s routing):
 
+> **Cesium ion tokens are no longer embedded.** `satviz_oec.html` is a tracked
+> file, so baking a token into it commits a credential. `satviz.py` now emits an
+> empty token by default; supply one at generation time with
+> `CESIUM_ION_TOKEN=<token> python3 -m oec_sim.satviz`, or
+> `--embed-local-token` for a copy you will not commit. The command prints
+> which of the two happened.
+
 1. **`oec_scenario/satviz_oec.html`** *(main)* — the OEC scenario on the
    Cesium 3D globe in Hypatia's SatViz style. Constellation animated over the
    full 5 h window with a timeline scrubber; per-frame LOS-gated ISLs,
@@ -333,8 +633,11 @@ results.
 │   │   ├── topology.py             # E_t: feasibility-gated links, static geometric routing
 │   │   ├── routing.py              # MPC-predicted link costs + per-tau Dijkstra fixed point
 │   │   ├── tasks.py                # AOI-triggered task arrivals, drop/reject tracking
+│   │   ├── utility.py              # THE unified utility: one definition shared by the score,
+│   │   │                           #   both MPCs, the hierarchy and the offline bound
 │   │   ├── schedulers.py           # MPC (MILP) + greedy baselines; O(H) constraint; timeliness objective
-│   │   ├── hier.py                 # Hierarchical MPC (mpc-hier) + rotting-backlog fix
+│   │   ├── twolevel.py             # mpc-2level: routing MPC + depth MPC as iterated peers
+│   │   ├── hier.py                 # mpc-hier (admission/drop) + mpc-hier-route (slow route/fast depth)
 │   │   ├── oracle.py               # Offline HiGHS upper bound (LP + time-limited MILP)
 │   │   ├── sweep.py                # Committed congestion sweep across load regimes x seeds
 │   │   ├── rl_env.py / rl_train.py # Gymnasium env + PPO baseline (needs a separate RL venv)
@@ -343,6 +646,7 @@ results.
 │   │   ├── land_110m.json          # Embedded Natural Earth landmass for satviz
 │   │   └── FORMULATION.md          # Parameters in the Overleaf notation
 │   ├── oec_scenario/               # Simulation outputs (CSVs, plots, viewer.html, satviz_oec.html)
+│   │   └── golden/                 # Committed legacy fingerprint (run_all --check-golden)
 │   ├── ppo_oec.zip                 # Trained PPO baseline (MaskablePPO, 300k timesteps)
 │   ├── requirements.txt            # Core sim deps (numpy, scipy, matplotlib)
 │   ├── requirements-rl.txt         # + RL training deps (gymnasium, sb3-contrib, torch)
@@ -355,6 +659,12 @@ results.
 │   ├── TOPOLOGY.md                 # Topology design doc
 │   └── small_scenario/             # Simulation outputs
 ├── rq-vae/
+│   ├── downstream/                 # Segmentation-on-reconstruction pipeline (server-side)
+│   │   ├── recon_to_geotiff.py     #   depth-q recon RGB + original NIR/Elev -> 5-band GeoTIFF
+│   │   ├── make_flair_csv.py       #   recon tree -> the 2-column CSV FLAIR expects
+│   │   ├── harvest_metrics.py      #   metrics.json -> oec_sim/quality_table.json (s_q)
+│   │   ├── run_depth_sweep.sh      #   tmux driver, one condition at a time (disk-safe)
+│   │   └── configs/                #   FLAIR predict+metrics template (no training)
 │   ├── evaluate_metrics.py
 │   ├── evaluate_truncation.py      # Depth-16 codebook reuse experiment
 │   ├── run_flair_8x8_sweep.sh
@@ -406,6 +716,28 @@ python3 -m oec_sim.sweep --quick              # committed congestion sweep, smok
 python3 small_scenario.py             # legacy 6-sat scenario
 ```
 
+### Unified utility and the two-MPC couplings
+
+```bash
+cd hypatia_sim
+python3 -m oec_sim.run_all --check-golden      # legacy regression gate
+python3 -m oec_sim.run_all --utility unified --oracle
+# both routing/depth couplings, into their own output dir so the canonical
+# gbs-limited run stays committed alongside
+python3 -m oec_sim.run_all --scenario fabric-limited --utility unified \
+        --couplings --congestion --oracle --out-suffix _couplings
+python3 -m oec_sim.sweep --couplings --utility unified   # grid over ISL rates
+```
+
+### Downstream segmentation (server, in tmux)
+
+```bash
+tmux new -s flair_sweep
+cd ~/Research-clean/rq-vae
+MAX_SAMPLES=500 ./downstream/run_depth_sweep.sh   # subset first, ~1 h
+./downstream/run_depth_sweep.sh                   # full 7,050, ~8-10 h
+```
+
 ### SatViz (Cesium 3D visualization)
 
 ```bash
@@ -429,16 +761,19 @@ python3 visualize_kuiper_630.py       # writes ../viz_output/kuiper_630.html
 
 1. Add residual-bandwidth/congestion features to the PPO observation (`rl_env.py::_obs()`) — the trained policy's actions are currently rate-independent (see RL section above), which is the main lever left to close its 5–8% utility gap to MPC
 2. `mpc-hier`'s admission/drop/backpressure thresholds were tuned once (`HIER_THETA_ADMIT` 0.9→0.5, `PHI_DROP` 0.05→0.01, closing ~1 utility point) but not exhaustively — still trades ~5.9% utility for 3.7× faster solves
-3. `satviz.py` route replay (`routes_mpc.csv`) so the Cesium viewer's client-side Dijkstra matches predictive/hierarchical routing instead of only the static router
+3. `satviz.py` route replay so the Cesium viewer's client-side Dijkstra matches predictive/hierarchical routing instead of only the static router — `routes_<sched>.csv` is now written by the routing-MPC schedulers, so the data side of this is done
 4. Robust/stochastic MPC variants (forecast uncertainty), per-GBS antenna constraints
-5. Train PPO on the full protocol (100 seeds, `starlink-550` OOD-topology transfer) on the NCSU server — this pass used a reduced local run (30 training seeds, 2 eval seeds/regime) to fit a CPU laptop
+5. Optimize Jain's index directly rather than through the maximin surrogate — needs a formulation the offline bound can also carry, which a ratio of quadratics is not
+6. Freeze a more *abstract* routing decision in `mpc-hier-route` (a serving-GBS assignment, or a route class) instead of a concrete path — concrete paths survive only 14.4% of the time on a moving LEO fabric (see the two-MPC section)
+7. Retrain PPO under the unified reward — `ppo_oec.zip` was trained against the legacy single-factor score and is stale for `--utility unified`
+8. Train PPO on the full protocol (100 seeds, `starlink-550` OOD-topology transfer) on the NCSU server — this pass used a reduced local run (30 training seeds, 2 eval seeds/regime) to fit a CPU laptop
 
 **RQ-VAE compression:**
 
-6. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
-7. Evaluate downstream-task metrics (mIoU / F1) on reconstructed images and replace the reconstruction-based utility mapping u_q in `oec_sim/config.py` — still the biggest lever on how much the depth choice can matter, since u_q currently spans only +12% (q=2→16) against an 8× payload spread
-8. Run NAC entropy coding on exported FLAIR codes
-9. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
+9. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
+10. **Run** the downstream segmentation sweep on the server (`rq-vae/downstream/run_depth_sweep.sh`) — the pipeline and the `s_q` wiring are done and the simulator reads `oec_sim/quality_table.json`, but the numbers in it are still provisional until the sweep executes. Start with the checkpoint gate (must reproduce mIoU 0.5443 on the uncompressed reference)
+11. Run NAC entropy coding on exported FLAIR codes
+12. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
 
 ---
 

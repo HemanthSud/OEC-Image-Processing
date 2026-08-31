@@ -1,0 +1,70 @@
+# FLAIR-1 predict+metrics ONLY (no training) against RQ-VAE reconstructions.
+# Placeholders __TEST_CSV__ / __OUT__ are filled in by run_depth_sweep.sh.
+#
+# Three things here are easy to get wrong and silently move mIoU by points:
+#   1. model_provider must be SegmentationModelsPytorch with resnet34_unet.
+#      The shipped flair-1-config.yaml defaults to openmmlab/upernet-swin-small,
+#      which is a DIFFERENT model from the published 0.5443 baseline.
+#   2. the `classes` weight vector must match the checkpoint's model card --
+#      src/flair/metrics.py deletes weight-0 rows/cols from the confusion
+#      matrix, so a mismatch changes which classes mIoU is averaged over.
+#   3. channels stays [1,2,3,4,5]: our reconstructions are written as 5-band
+#      rasters (recon RGB + original NIR/Elevation), so the 5-band checkpoint
+#      loads unchanged and no segmentation training is needed.
+tasks:
+  train: False
+  predict: True
+  metrics: True
+  delete_preds: True        # ~1.8 GB of prediction masks per condition
+
+paths:
+  train_csv: __TEST_CSV__
+  val_csv: __TEST_CSV__
+  test_csv: __TEST_CSV__
+  out_folder: __OUT__
+  out_model_name: recon
+  ckpt_model_path: checkpoints/unet-r34-rgbie/model.ckpt
+
+model_framework:
+  model_provider: SegmentationModelsPytorch
+  SegmentationModelsPytorch:
+    encoder_decoder: resnet34_unet
+    encoder_weights: null
+
+georeferencing_output: True
+use_augmentation: False
+use_metadata: False
+supervision_starts_at_one: True
+
+data:
+  channels: [1, 2, 3, 4, 5]
+  norm_type: custom
+  norm_means: [105.08, 110.87, 101.82, 106.38, 53.26]
+  norm_stds:  [52.17, 45.38, 44.00, 39.69, 79.30]
+
+hyperparams:
+  batch_size: 8
+  num_workers: 6
+  img_pixels_detection: 512
+
+# 19 FLAIR classes, k: [weight, name]. Weight 0 => excluded from mIoU.
+classes:
+  1:  [1, building]
+  2:  [1, pervious surface]
+  3:  [1, impervious surface]
+  4:  [1, bare soil]
+  5:  [1, water]
+  6:  [1, coniferous]
+  7:  [1, deciduous]
+  8:  [1, brushwood]
+  9:  [1, vineyard]
+  10: [1, herbaceous vegetation]
+  11: [1, agricultural land]
+  12: [1, plowed land]
+  13: [0, swimming_pool]
+  14: [0, snow]
+  15: [0, clear cut]
+  16: [0, mixed]
+  17: [0, ligneous]
+  18: [0, greenhouse]
+  19: [0, other]

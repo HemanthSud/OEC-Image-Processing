@@ -1,0 +1,85 @@
+{
+  "analytic_ceiling": 69.95,
+  "lp_bound": 65.66,
+  "scenario": "gbs-limited",
+  "schedulers": {
+    "greedy-adaptive": {
+      "depth_mix": {
+        "16": 14,
+        "2": 0,
+        "4": 19,
+        "8": 31
+      },
+      "dropped": 0,
+      "images": 12809971.0,
+      "utility": 64.121498
+    },
+    "greedy-fixed-16": {
+      "depth_mix": {
+        "16": 64,
+        "2": 0,
+        "4": 0,
+        "8": 0
+      },
+      "dropped": 0,
+      "images": 11186623.69,
+      "utility": 24.428598
+    },
+    "greedy-fixed-2": {
+      "depth_mix": {
+        "16": 0,
+        "2": 64,
+        "4": 0,
+        "8": 0
+      },
+      "dropped": 0,
+      "images": 12809971.0,
+      "utility": 58.853035
+    },
+    "greedy-fixed-4": {
+      "depth_mix": {
+        "16": 0,
+        "2": 0,
+        "4": 64,
+        "8": 0
+      },
+      "dropped": 0,
+      "images": 12809971.0,
+      "utility": 62.254023
+    },
+    "greedy-fixed-8": {
+      "depth_mix": {
+        "16": 0,
+        "2": 0,
+        "4": 0,
+        "8": 64
+      },
+      "dropped": 0,
+      "images": 12809971.0,
+      "utility": 64.153793
+    },
+    "mpc": {
+      "depth_mix": {
+        "16": 34,
+        "2": 0,
+        "4": 8,
+        "8": 22
+      },
+      "dropped": 0,
+      "images": 12214546.976,
+      "utility": 64.947052
+    },
+    "mpc-hier": {
+      "depth_mix": {
+        "16": 8,
+        "2": 18,
+        "4": 19,
+        "8": 19
+      },
+      "dropped": 16,
+      "images": 12179757.817,
+      "utility": 61.396273
+    }
+  },
+  "utility_mode": "legacy"
+}

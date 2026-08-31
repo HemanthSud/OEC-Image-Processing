@@ -31,6 +31,35 @@ Depths D        [2, 4, 8, 16]  payload b_q = 176 B, 352 B, 704 B, 1408 B
   greedy-fixed-16      11,186,624      87.3%     24.43     31.3%   85.9%        0
   mpc-hier             12,179,758      95.1%     61.40     84.3%   45.3%       16
 
+── Unified utility decomposition ────────────────────────────
+  quality source: u_q = 1 - LPIPS_q (truncation_eval.txt, 7050 FLAIR val images)
+  mode=legacy  weights  omega_Q=1.0 omega_T=0.0 omega_E=0.0 omega_F=0.0  segments=1
+  s_q = 2:0.4430  4:0.4686  8:0.4829  16:0.4961
+  scheduler           total  quality   -tardy   -cost   +fair   u_min   jain   enc kJ   tx kJ
+  mpc                64.947   64.947   -0.000  -0.000   0.000  0.5535 0.9869   4521.8   19.65
+  greedy-adaptive    64.121   64.121   -0.000  -0.000   0.000  0.5504 0.9869   4742.3   14.58
+  greedy-fixed-2     58.853   58.853   -0.000  -0.000   0.000  0.5203 0.9886   4742.3    3.61
+  greedy-fixed-4     62.254   62.254   -0.000  -0.000   0.000  0.5504 0.9886   4742.3    7.21
+  greedy-fixed-8     64.154   64.154   -0.000  -0.000   0.000  0.5671 0.9886   4742.3   14.43
+  greedy-fixed-16    24.429   24.429   -0.000  -0.000   0.000  0.0000 0.4272   4141.3   25.20
+  mpc-hier           61.396   61.396   -0.000  -0.000   0.000  0.5535 0.9822   4508.9    9.93
+  (Jain is a DIAGNOSTIC only -- it is a ratio of quadratics and
+   is not MILP-representable, so u_min is what gets optimized.)
+
+── Routing ──────────────────────────────────────────────────
+  scheduler          hops  delay ms  paths/(k,t)  frozen ok @exec  @horizon  route LPs  route s
+  mpc                   -         -            -           static         -          0     0.00
+  greedy-adaptive       -         -            -           static         -          0     0.00
+  greedy-fixed-2        -         -            -           static         -          0     0.00
+  greedy-fixed-4        -         -            -           static         -          0     0.00
+  greedy-fixed-8        -         -            -           static         -          0     0.00
+  greedy-fixed-16       -         -            -           static         -          0     0.00
+  mpc-hier              -         -            -           static         -          0     0.00
+  (frozen ok @exec = a route frozen for a macro-epoch was still
+   feasible at the slot it was USED; @horizon = across the whole
+   planning lookahead. The price of the hierarchical coupling on
+   a MOVING constellation -- GSL contacts last only ~230-265 s.)
+
 ── Delay / depth mix ────────────────────────────────────────
   mpc              mean delay    2216s  p95    3189s  depth mix 2:0 4:8 8:22 16:34
   greedy-adaptive  mean delay    2463s  p95    3536s  depth mix 2:0 4:19 8:31 16:14
@@ -41,8 +70,8 @@ Depths D        [2, 4, 8, 16]  payload b_q = 176 B, 352 B, 704 B, 1408 B
   mpc-hier         mean delay    2678s  p95    3388s  depth mix 2:18 4:19 8:19 16:8
 
 ── MPC solve-time instrumentation ───────────────────────────
-  mpc               121 solves   mean   149.0 ms   p95  1349.0 ms   max  2196.9 ms   total   18.0 s
-  mpc-hier          113 solves   mean    36.3 ms   p95   131.1 ms   max   505.0 ms   total    4.1 s
+  mpc               121 solves   mean   216.8 ms   p95  1242.3 ms   max  6314.5 ms   total   26.2 s
+  mpc-hier          113 solves   mean    97.2 ms   p95   401.4 ms   max  1087.6 ms   total   11.0 s
 
 Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,
 tasks.csv, timeline_*.csv, task_outcomes_*.csv, solve_log_*.csv,
@@ -55,14 +84,14 @@ budget is enforced; ISL/GSL rows dropped -- valid because they never bind at
 the committed rates, and dropping rows can only raise the bound further)
 ==========================================================================
 analytic ceiling (everything at best depth, instantly):    69.95
-LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.3s, status=0)
-MILP bound (integral depth, full resolution, time_limit=120s): incumbent    65.15  dual    65.22  mip_gap=0.001   (25.9s, status=0)
+LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.8s, status=0)
+MILP bound (integral depth, full resolution, time_limit=120s): incumbent    64.82  dual    65.23  mip_gap=0.006   (16.6s, status=1)
 
 scheduler          utility  gap to bound
   mpc                  64.95          0.4%
   greedy-adaptive      64.12          1.7%
   greedy-fixed-2       58.85          9.8%
-  greedy-fixed-4       62.25          4.5%
+  greedy-fixed-4       62.25          4.6%
   greedy-fixed-8       64.15          1.6%
   greedy-fixed-16      24.43         62.5%
   mpc-hier             61.40          5.9%

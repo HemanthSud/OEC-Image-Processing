@@ -35,6 +35,7 @@ from scipy.sparse import csr_matrix
 
 from . import config as C
 from . import routing as R
+from . import utility
 
 
 # ── shared helpers ────────────────────────────────────────────────────────────
@@ -60,6 +61,20 @@ def _edge_keys(topo, isl_index, t, task):
                                 isl_index)
 
 
+def _iter_shares(keys):
+    """Yield (edge_key, share) for a route entry.
+
+    A single path is a list of edge keys, each carrying the task's whole
+    flow (share 1.0). A multipath mix (twolevel.RouteMix) is a dict
+    {edge_key: share in [0,1]}, which is what lets several candidate paths
+    enter the depth MILP without adding any path variables to it: the
+    capacity coefficient becomes b_q * 8 * share instead of b_q * 8.
+    """
+    if isinstance(keys, dict):
+        return list(keys.items())
+    return [(key, 1.0) for key in keys]
+
+
 def _cap_bits(key):
     if key[0] == 'gs':
         rate = C.GS_RATE_BPS
@@ -76,8 +91,7 @@ def _record_delivery(task, t, images, route_delay_s=0.0):
     t_end = (t + 1) * C.SLOT_S + route_delay_s
     task.delivered += images
     task.delivery_slots[t] = task.delivery_slots.get(t, 0.0) + images
-    task.delivered_utility += (task.weight * task.freshness(t_end)
-                               * C.UTILITY[task.depth] * images / task.n_images)
+    task.delivered_utility += utility.accumulate(task, images, t_end)
     if task.first_delivery_slot is None:
         task.first_delivery_slot = t
     if task.delivered >= task.n_images - 1e-6 and task.completion_slot is None:
@@ -92,6 +106,12 @@ class _Base:
     def __init__(self, topo, tasks):
         self.topo = topo
         self.tasks = tasks
+        # Clear any per-task utility state. run_all hands every scheduler a
+        # freshly generated task list, but a carried-over coverage accumulator
+        # would silently corrupt the score rather than fail loudly, so start
+        # from a clean slate unconditionally.
+        for k in tasks:
+            utility.reset(k)
         self.isl_index = {(min(a, b), max(a, b)): l
                           for l, (a, b) in enumerate(topo.isl_pairs)}
         self.static = R.StaticRouter(topo)
@@ -113,7 +133,8 @@ class _Base:
                           if k.arrival_slot <= t and not k.dropped)
             hist['t_s'].append(t * C.SLOT_S)
             hist['delivered_images'].append(sum(k.delivered for k in self.tasks))
-            hist['utility'].append(sum(k.delivered_utility for k in self.tasks))
+            arrived = [k for k in self.tasks if k.arrival_slot <= t]
+            hist['utility'].append(utility.run_utility(arrived)[0])
             hist['backlog_bits'].append(backlog)
             hist['n_active'].append(len(active))
             hist['n_dropped'].append(sum(1 for k in self.tasks if k.dropped))
@@ -197,6 +218,7 @@ class MPCScheduler(_Base):
             self.predictor = R.PredictiveRouter(topo, self.isl_index)
         self.plan = {}           # (kid, q, abs_slot) -> images
         self.plan_paths = {}     # (kid, abs_slot) -> keys, for _execute
+        self.plan_delay = {}     # (kid, abs_slot) -> route delay s, for _execute
         self.last_solve = -10**9
         self.known = set()
 
@@ -238,11 +260,11 @@ class MPCScheduler(_Base):
     def _solve(self, t, active):
         H = min(self.H, C.N_SLOTS - t)
         if H <= 0 or not active:
-            self.plan, self.plan_paths = {}, {}
+            self.plan, self.plan_paths, self.plan_delay = {}, {}, {}
             return
 
         n_rounds = C.MPC_ROUTE_ITERS if self.route_mode == 'predictive' else 1
-        load, best, best_rs = {}, None, None
+        load, best, best_rs, best_paths = {}, None, None, None
         t_start = time.perf_counter()
         for it in range(max(1, n_rounds)):
             if self.route_mode == 'predictive' and it > 0:
@@ -257,7 +279,7 @@ class MPCScheduler(_Base):
                 wall_s=sol['wall_s']))
             if sol['status'] == 'optimal' and (
                     best is None or sol['objective'] > best['objective']):
-                best, best_rs = sol, rs
+                best, best_rs, best_paths = sol, rs, paths
             if self.route_mode != 'predictive' or n_rounds <= 1:
                 break
             new_load = self._accumulate_load(t, sol['plan'], paths)
@@ -272,14 +294,23 @@ class MPCScheduler(_Base):
                 break
 
         if best is None:
-            self.plan, self.plan_paths = {}, {}
+            self.plan, self.plan_paths, self.plan_delay = {}, {}, {}
             return
         self.plan = best['plan']
+        # Execute against the *winning* iterate's routes. Re-deriving them here
+        # from the post-loop `load` (as an earlier version did) could hand
+        # _execute a different path set than the MILP that produced `best` was
+        # solved against, so the executed capacity edges need not be the ones
+        # the plan respected. Carrying best_paths/best_rs also skips a
+        # redundant Dijkstra rebuild.
         self.plan_paths = {(kid, t + tau): keys
-                           for (kid, tau), keys in
-                           (self._paths_predictive(t, H, active, load)[0]
-                            if self.route_mode == 'predictive' and best_rs is not None
-                            else self._paths_static(t, H, active)[0]).items()}
+                           for (kid, tau), keys in best_paths.items()}
+        # ...and score the delivery on the delay of the route actually used,
+        # not the geometric one (they differ whenever route_mode='predictive'
+        # and the fabric is congested enough for the router to detour).
+        self.plan_delay = {(k.kid, t + tau): self._delay_for(t, tau, k, best_rs)
+                           for k in active for tau in range(H)
+                           if (k.kid, tau) in best_paths}
         # commit depth for tasks the plan actually starts transmitting
         for k in active:
             if k.depth is None:
@@ -302,8 +333,8 @@ class MPCScheduler(_Base):
             if not keys:
                 continue
             bits = y * C.PAYLOAD_B[q] * 8
-            for key in keys:
-                load[(tau, key)] = load.get((tau, key), 0.0) + bits
+            for key, share in _iter_shares(keys):
+                load[(tau, key)] = load.get((tau, key), 0.0) + bits * share
         return load
 
     @staticmethod
@@ -314,8 +345,15 @@ class MPCScheduler(_Base):
         return max(abs(old.get(k, 0.0) - new.get(k, 0.0))
                    / max(_cap_bits(k[1]), 1.0) for k in keys)
 
-    def _solve_milp(self, t, H, active, paths, rs):
+    def _solve_milp(self, t, H, active, paths, rs, delay_of=None):
+        """delay_of: optional {(kid, tau) -> seconds}, the flow-weighted
+        effective delay of a multipath mix. Falls back to the router's
+        single-path delay when absent."""
         t0 = time.perf_counter()
+        def _delay(tau, k):
+            if delay_of is not None and (k.kid, tau) in delay_of:
+                return delay_of[(k.kid, tau)]
+            return self._delay_for(t, tau, k, rs)
         yvars = []
         for k in active:
             qs = [k.depth] if k.depth else C.DEPTHS
@@ -335,26 +373,49 @@ class MPCScheduler(_Base):
         Yi = {(k.kid, tau): len(yvars) + len(xvars) + i
               for i, (k, tau) in enumerate((k, tau)
                                            for k in active for tau in range(H))}
-        n = len(yvars) + len(xvars) + len(Yi)
+        # Concave-coverage segments (utility.SegmentBlock). Indexing lambda by
+        # q as well as j is what lets the quality term s_q multiply the
+        # coverage gain while both stay linear. Inert when J == 1.
+        seg = utility.SegmentBlock(yi, len(yvars) + len(xvars) + len(Yi),
+                                   group_of=utility.stride_grouper())
+        n = len(yvars) + len(xvars) + len(Yi) + len(seg)
+        # Fairness: one continuous column carrying the maximin floor
+        # min_k Uhat_k. Jain is a ratio of quadratics and is not
+        # MILP-representable -- optimizing it would leave oracle.py with no
+        # valid bound to compare against -- so the floor is what we optimize
+        # and Jain is reported as a diagnostic only.
+        umin_i = n if C.UTIL_W_FAIR else None
+        if umin_i is not None:
+            n += 1
         task_by_id = {k.kid: k for k in active}
 
-        # objective (milp minimizes -> negate): value + early-delivery bonus
-        # - tardiness penalty. value uses freshness at the *arrival* time,
-        # i.e. slot-end plus this route's propagation delay (Xuanhao's ask:
-        # a real delay-related term, not just the freshness discount alone).
+        # objective (milp minimizes -> negate). The value terms come from
+        # utility.y_coeff, the single definition shared with the realized
+        # score, hier.py and oracle.py -- these four used to disagree. Value
+        # uses freshness at the *arrival* time, i.e. slot-end plus this
+        # route's propagation delay (Xuanhao's ask: a real delay-related
+        # term, not just the freshness discount alone).
+        # `early` and the x[k,q] cost below stay objective-only regularizers:
+        # they were never part of the score, and legacy must preserve that.
         c = np.zeros(n)
+        val = np.zeros(n)      # pure reported-score coefficients, no regularizers
         for (kid, q, tau), i in yi.items():
             k = task_by_id[kid]
-            delay_s = self._delay_for(t, tau, k, rs)
+            delay_s = _delay(tau, k)
             t_arrive = (t + tau + 1) * C.SLOT_S + delay_s
-            phi = k.freshness(t_arrive)
-            util = k.weight * phi * C.UTILITY[q] / k.n_images
+            util = utility.y_coeff(k, q, t_arrive)
+            val[i] = util
             early = (C.MPC_LAMBDA_QUEUE * (H - tau)
                      * C.PAYLOAD_B[q] * 8 / 1e9)          # backlog term, Gbit
-            late_s = max(0.0, t_arrive - k.deadline_s)
-            tardy = (C.MPC_LAMBDA_LATE * k.weight
-                     * late_s / C.TARDINESS_REF_S / k.n_images)
+            tardy = utility.objective_tardiness_coeff(k, t_arrive)
             c[i] = -(util + early - tardy)
+        seg.set_objective(
+            c, task_by_id,
+            lambda g: ((t + g[2] * C.UTIL_SEG_STRIDE + 1) * C.SLOT_S
+                       + _delay(g[2] * C.UTIL_SEG_STRIDE, task_by_id[g[0]])),
+            val=val)
+        if umin_i is not None:
+            c[umin_i] = -(C.UTIL_W_FAIR * max(len(self.tasks), 1))
         for (kid, q), i in xi.items():
             k = task_by_id[kid]
             rem = k.n_images - k.delivered
@@ -407,18 +468,39 @@ class MPCScheduler(_Base):
                 add(ent, 0.0, 0.0)
                 prev = yi_tau
 
+        # Coverage-segment linking + residual caps. The residual matters:
+        # coverage already delivered before this horizon has consumed the
+        # steep early segments, and without it the MPC re-earns segment-1
+        # credit at every single re-plan.
+        seg.add_rows(add, ub_var, yi, task_by_id)
+
+        if umin_i is not None:
+            # u_min <= Uhat_k for every active task. Uhat_k is CUMULATIVE
+            # (already-realized utility as a constant plus the in-horizon
+            # linear expression) -- using only the within-horizon gain would
+            # make every late-admitted task look starved and turn the term
+            # into noise.
+            for k in active:
+                const_k, scale_k = utility.fair_row_coeffs(k)
+                ent = [(umin_i, 1.0)]
+                ent += [(i, -scale_k * val[i])
+                        for (kid, q, tau), i in yi.items() if kid == k.kid]
+                ent += [(i, -scale_k * val[i]) for i in seg.columns_of(k.kid)]
+                add(ent, -np.inf, const_k)
+
         # link capacities per (slot, edge) — only rows with >=1 user exist
         edge_users = {}
         for (kid, tau), keys in paths.items():
-            for key in keys:
-                edge_users.setdefault((tau, key), []).append(kid)
-        for (tau, key), kids in edge_users.items():
+            for key, share in _iter_shares(keys):
+                edge_users.setdefault((tau, key), []).append((kid, share))
+        for (tau, key), users in edge_users.items():
             ent = []
-            for kid in kids:
+            for kid, share in users:
                 k = task_by_id[kid]
                 for q in ([k.depth] if k.depth else C.DEPTHS):
                     if (kid, q, tau) in yi:
-                        ent.append((yi[(kid, q, tau)], C.PAYLOAD_B[q] * 8.0))
+                        ent.append((yi[(kid, q, tau)],
+                                    C.PAYLOAD_B[q] * 8.0 * share))
             if ent:
                 add(ent, -np.inf, _cap_bits(key))
 
@@ -427,10 +509,16 @@ class MPCScheduler(_Base):
         for v, i in xi.items():
             integrality[i] = 1
             ub_var[i] = 1.0
+        lb_var = np.zeros(n)
+        if umin_i is not None:
+            # Uhat_k can go negative once the tardiness/cost penalties exceed
+            # the quality gain, and a floor pinned at 0 would then make the
+            # row u_min <= Uhat_k infeasible.
+            lb_var[umin_i] = -np.inf
         res = milp(c=c,
                    constraints=LinearConstraint(A, np.array(lbs), np.array(ubs)),
                    integrality=integrality,
-                   bounds=Bounds(np.zeros(n), ub_var))
+                   bounds=Bounds(lb_var, ub_var))
         wall_s = time.perf_counter() - t0
         plan = {}
         status = 'optimal' if res.x is not None else 'infeasible'
@@ -454,14 +542,18 @@ class MPCScheduler(_Base):
                 keys = _edge_keys(self.topo, self.isl_index, t, k)
             if keys is None:
                 continue
-            for key in keys:
+            shares = _iter_shares(keys)
+            for key, _ in shares:
                 residual.setdefault(key, _cap_bits(key))
             img_bits = C.PAYLOAD_B[k.depth] * 8
+            room = [residual[key] / (img_bits * share)
+                    for key, share in shares if share > 1e-12]
             y = min(y, k.encoded_by((t + 1) * C.SLOT_S) - k.delivered,
-                    min(residual[key] for key in keys) / img_bits)
+                    min(room) if room else 0.0)
             if y <= 1e-9:
                 continue
-            for key in keys:
-                residual[key] -= y * img_bits
-            delay = self.static.delay_s(t, k.dst_gs, k.src_sat)
+            for key, share in shares:
+                residual[key] -= y * img_bits * share
+            delay = self.plan_delay.get(
+                (k.kid, t), self.static.delay_s(t, k.dst_gs, k.src_sat))
             _record_delivery(k, t, y, route_delay_s=delay)

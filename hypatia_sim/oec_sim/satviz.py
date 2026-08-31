@@ -17,8 +17,16 @@ Run:  python3 -m oec_sim.satviz          (from hypatia_sim/)
 Out:  oec_scenario/satviz_oec.html       (open in a browser; internet is
       required for the Cesium library and map tiles)
 
-The Cesium ion token is copied from hypatia/satviz/viz_output/kuiper_630.html
-if present.
+The Cesium ion token is NOT embedded by default. satviz_oec.html is a tracked
+file, so baking a token into it commits a credential to the repository -- which
+is exactly what happened before this was changed (the token sat in git history
+from commit 4badf5a onward). Supply it at generation time instead:
+
+    CESIUM_ION_TOKEN=<token> python3 -m oec_sim.satviz     # not committed
+    python3 -m oec_sim.satviz --embed-local-token          # opt in explicitly
+
+With neither, the page renders with an empty token and prints a one-line hint
+in the browser telling the viewer to paste their own (free, cesium.com/ion).
 """
 
 import csv
@@ -27,6 +35,7 @@ import os
 import re
 
 from . import config as C
+from . import utility
 from .topology import build_isl_pairs
 
 OUT_FILE = os.path.join(C.OUT_DIR, 'satviz_oec.html')
@@ -35,14 +44,24 @@ _TOKEN_SOURCE = os.path.join(
     'hypatia', 'satviz', 'viz_output', 'kuiper_630.html')
 
 
-def _ion_token():
-    try:
-        with open(_TOKEN_SOURCE) as f:
-            m = re.search(r"defaultAccessToken = '([^']+)'", f.read())
-        if m and not m.group(1).startswith('<'):
-            return m.group(1)
-    except OSError:
-        pass
+def _ion_token(embed_local=False):
+    """Cesium ion token to bake into the page.
+
+    Order: CESIUM_ION_TOKEN env var, then -- only when explicitly opted into --
+    the token in a local Hypatia clone. Defaults to empty so a routine
+    regeneration never writes a credential into this tracked artifact.
+    """
+    tok = os.environ.get('CESIUM_ION_TOKEN', '').strip()
+    if tok:
+        return tok
+    if embed_local:
+        try:
+            with open(_TOKEN_SOURCE) as f:
+                m = re.search(r"defaultAccessToken = '([^']+)'", f.read())
+            if m and not m.group(1).startswith('<'):
+                return m.group(1)
+        except OSError:
+            pass
     return ''
 
 
@@ -111,7 +130,7 @@ def build_data():
         'simS': C.SIM_S, 'slotS': C.SLOT_S,
         'islRateBps': C.ISL_RATE_BPS, 'gsRateBps': C.GS_RATE_BPS,
         'depths': C.DEPTHS,
-        'utility': {str(q): C.UTILITY[q] for q in C.DEPTHS},
+        'utility': {str(q): utility.quality(q) for q in C.DEPTHS},
         'payloadB': {str(q): C.PAYLOAD_B[q] for q in C.DEPTHS},
         'encMsPerImg': C.ENC_S_PER_IMG * 1e3,
         'mpcH': C.MPC_HORIZON_SLOTS, 'mpcResolve': C.MPC_RESOLVE_EVERY,
@@ -629,11 +648,19 @@ _HTML = r"""<html lang="en">
 """
 
 
-def main():
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--embed-local-token', action='store_true',
+                    help='bake the token from a local Hypatia clone into the '
+                         'page. This file is tracked by git, so only use it '
+                         'for a copy you will NOT commit.')
+    args = ap.parse_args(argv)
+    token = _ion_token(embed_local=args.embed_local_token)
     data = build_data()
     html = (_HTML
             .replace('__CONSTELLATION__', data['constellation'])
-            .replace('__TOKEN__', _ion_token())
+            .replace('__TOKEN__', token)
             .replace('__DATA__', json.dumps(data, separators=(',', ':'))))
     os.makedirs(C.OUT_DIR, exist_ok=True)
     with open(OUT_FILE, 'w') as f:
@@ -641,6 +668,10 @@ def main():
     print('wrote', OUT_FILE,
           '(%d tasks, %d ISL pairs)' % (len(data['tasks']),
                                         len(data['islPairs'])))
+    if token:
+        print('  !! a Cesium ion token IS embedded -- do not commit this file')
+    else:
+        print('  no token embedded (set CESIUM_ION_TOKEN to add one)')
 
 
 if __name__ == '__main__':

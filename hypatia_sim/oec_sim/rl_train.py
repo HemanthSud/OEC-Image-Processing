@@ -25,6 +25,7 @@ import argparse
 import os
 
 from . import config as C
+from . import utility
 from . import topology as T
 from .schedulers import _Base, _record_delivery
 
@@ -122,7 +123,11 @@ class RLScheduler(_Base):
                              if k.arrival_slot <= env.t and not k.dropped)
                 hist['t_s'].append(env.t * C.SLOT_S)
                 hist['delivered_images'].append(sum(k.delivered for k in self.tasks))
-                hist['utility'].append(sum(k.delivered_utility for k in self.tasks))
+                # same accounting as _Base.run(): utility.run_utility carries
+                # the fairness bonus, so ppo stays comparable to every other
+                # scheduler under --utility unified
+                arrived = [k for k in self.tasks if k.arrival_slot <= env.t]
+                hist['utility'].append(utility.run_utility(arrived)[0])
                 hist['backlog_bits'].append(backlog)
                 hist['n_active'].append(len(active))
                 hist['n_dropped'].append(sum(1 for k in self.tasks if k.dropped))
