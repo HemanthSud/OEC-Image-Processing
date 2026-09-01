@@ -105,6 +105,11 @@ Window: 5 h (3.1 orbits) at 30 s slots. Run with `python3 -m oec_sim.run_all`
 ~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
 notation.
 
+> **Condensed summary:** [Downstream-Grounded Utility](https://claude.ai/code/artifact/57268d58-3744-47c8-949b-6d011c022d86)
+> is a one-page readout of the headline result below — the margin between MPC
+> and a fixed depth choice, before and after grounding quality in a real
+> downstream task instead of pixel fidelity.
+
 ### Unified Utility — one number that balances all the factors
 
 Utility used to be defined in **five places that disagreed**. The *reported*
@@ -377,16 +382,20 @@ Both reduce exactly to their baselines by construction, and that is tested:
 `MPC2L_ITERS=1, MPC_ROUTE_NPATHS=1` reproduces `mpc` bit-for-bit, and
 `HIER_ROUTE_ON=False` reproduces `mpc-hier` bit-for-bit.
 
-**Results** (`fabric-limited`, unified utility, ISL 1 Mbps — the regime where
-29.6% of links are oversubscribed and routing can actually matter):
+**Results** (`fabric-limited`, unified utility, **real measured quality table**
+— `flair-unet-r34-rgbie / val7050` — ISL 1 Mbps, the regime where 29.6% of
+links are oversubscribed and routing can actually matter):
 
-| scheduler | utility | gap to bound (46.06) | solve time | delivery% | on-time% | paths/(k,t) |
+| scheduler | utility | gap to bound (18.99) | solve time | delivery% | on-time% | paths/(k,t) |
 |---|---|---|---|---|---|---|
-| `mpc-congestion` | **45.68** | 0.8% | 54.9 s | 90.8% | 87.6% | 1 |
-| `mpc-2level` | **45.66** | 0.9% | 52.5 s | **92.0%** | **88.7%** | **1.51** |
-| `mpc` | 45.45 | 1.3% | 21.4 s | 91.3% | 88.1% | 1 |
-| `mpc-hier` | 40.42 | 12.2% | **6.3 s** | 82.9% | 76.8% | 1 |
-| `mpc-hier-route` | 40.41 | 12.3% | **5.5 s** | 84.5% | 77.1% | frozen route usable at execution only **7.6%** of the time |
+| `mpc-2level` | **18.90** | **0.5%** | 45.2 s | **90.3%** | **88.6%** | **1.60** |
+| `mpc-congestion` | 18.86 | 0.7% | 53.7 s | 89.3% | 87.6% | 1 |
+| `mpc` | 18.76 | 1.2% | 20.4 s | 87.9% | 86.3% | 1 |
+| `mpc-hier` | 14.76 | 22.3% | **5.3 s** | 78.7% | 75.0% | 1 |
+| `mpc-hier-route` | 14.78 | 22.2% | **5.1 s** | 81.9% | 78.6% | frozen route usable at execution only **7.7%** of the time |
+
+The offline bound converged cleanly on this run (MILP `mip_gap = 0.000`), so
+the gap column above is exact, not an approximation.
 
 **The pick: `mpc-2level`** — and the pre-registered rule made that call, not
 hindsight. The rule, written before any coupling was run, was: *recommend the
@@ -396,10 +405,19 @@ The default favoured the cheap coupling deliberately — `mpc-hier-route` solves
 ~10× faster, and routes across a 1,156-satellite fabric are not realistically
 re-planned every 30 s with a ground solver in the loop.
 
-It loses anyway, and not narrowly — in **5 of 5 regimes**, by 4.4 to 5.6
-points. Committed sweep, `oec_scenario/sweep/results_routing.csv`, 5 ISL rates
+It loses anyway, and not narrowly. The single verified point above (real
+quality table) already shows the gap **widening**, not shrinking, once
+quality is measured rather than assumed: 22.2 points of bound-gap difference,
+against 12.3 points under the placeholder table used for the sweep below.
+
+> ⚠️ The 5-point ISL-rate sweep immediately below still uses the **placeholder**
+> quality table — it has not yet been rerun against the real one. Treat its
+> exact numbers as provisional; the verified point above is the one to trust,
+> and it points the same direction, harder.
+
+Committed sweep, `oec_scenario/sweep/results_routing.csv`, 5 ISL rates
 × 3 seeds, mean over seeds (the rule was drafted for a 6-point grid and is
-applied as ≥4 of 5):
+applied as ≥4 of 5), **5 of 5 regimes**, by 4.4 to 5.6 points:
 
 | ISL Mbps | `mpc` | `mpc-2level` | `mpc-hier` | `mpc-hier-route` | 2level − hier-route |
 |---|---|---|---|---|---|
@@ -422,13 +440,14 @@ that clear. Broken out against each coupling's own baseline:
 
 Two things follow, and both are worth more than the headline:
 
-1. **The routing MPC buys at most +0.84%**, only where the fabric is genuinely
-   scarce, and **exactly nothing** once ISL ≥ 1.5 Mbps — where it converges to
-   the flat MPC because there is no contention left to route around. It costs
-   37–61 s of solve time against `mpc`'s ~22 s to do it. A routing *optimizer*
-   is simply not worth much here over a good routing *heuristic*:
-   `mpc-congestion`, plain congestion-weighted Dijkstra, matches it (45.68 vs
-   45.66 at the operating point).
+1. **The routing MPC buys at most +0.84%** in this (placeholder-table) sweep,
+   only where the fabric is genuinely scarce, and **exactly nothing** once
+   ISL ≥ 1.5 Mbps — where it converges to the flat MPC because there is no
+   contention left to route around. It costs 37–61 s of solve time against
+   `mpc`'s ~22 s to do it. A routing *optimizer* is simply not worth much here
+   over a good routing *heuristic* — confirmed with real quality data too, see
+   the verified point above (`mpc-congestion` comes within a hair of
+   `mpc-2level`, 18.86 vs 18.90).
 2. **Route freezing contributes nothing**: `mpc-hier-route` − `mpc-hier` swings
    both signs and averages ≈ +0.16, i.e. noise — exactly what a frozen route
    that is usable under 8% of the time predicts.
@@ -450,8 +469,8 @@ frozen at epoch start:
 | still feasible | **14.4%** | 11.7% | 12.2% | 3.3% | 0.0% |
 
 (that breakdown is from a 250-slot diagnostic; over the full 601-slot run the
-executed-slot figure is **7.6%**, and `summary.txt` reports it alongside the
-across-the-horizon rate, 4.9%, since the two answer different questions.)
+executed-slot figure is **7.7%**, and `summary.txt` reports it alongside the
+across-the-horizon rate, 4.6%, since the two answer different questions.)
 
 Even at the *executed* slot, with zero lookahead, the frozen route is usable
 under 15% of the time, and shortening the epoch to 2 minutes does not help
@@ -462,13 +481,13 @@ more abstract decision — a serving-GBS assignment, or a route class — might
 survive, and that is now on the Pending list rather than claimed here.
 
 **Two things worth stating plainly about the winner, too.** First, the routing
-MPC beats the flat MPC by only **+0.46%** (45.66 vs 45.45) even in a
+MPC beats the flat MPC by only **+0.75%** (18.90 vs 18.76) even in a
 deliberately fabric-limited regime — and `mpc-congestion`, the far simpler
-predicted-cost Dijkstra, matches it (45.68) at the same cost. The routing
-*optimizer* is not buying much over a well-chosen routing *heuristic*. Second,
-the ~5-point gap between the flat/peer family (~45.5) and the hierarchical
-family (~40.4) is about **admission and drop**, not routing at all —
-`mpc-hier` gives up 36 tasks explicitly.
+predicted-cost Dijkstra, comes within a hair of it (18.86 vs 18.90) at the
+same cost. The routing *optimizer* is not buying much over a well-chosen
+routing *heuristic*. Second, the ~4-point gap between the flat/peer family
+(~18.8) and the hierarchical family (~14.8) is about **admission and drop**,
+not routing at all — `mpc-hier` gives up 39 tasks explicitly.
 
 Two implementation traps produced convincing-looking null results before being
 caught, both recorded in `FORMULATION.md` because they generalize:
