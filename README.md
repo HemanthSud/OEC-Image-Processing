@@ -142,12 +142,13 @@ downstream task is that depth choice stops being degenerate:
 | | best fixed depth | mpc | mpc's margin | gap to HiGHS bound |
 |---|---|---|---|---|
 | legacy utility | 64.15 (`fixed-8`) | **64.95** | +1.2% | 0.4% |
-| unified utility | 41.42 (`fixed-8`) | **44.56** | **+7.6%** | 2.5% |
+| unified utility | 13.71 (`fixed-8`) | **18.13** | **+32.2%** | 3.7% |
 
 Under the old single-factor score the MPC was barely distinguishable from
-picking depth 8 and never thinking again. Under the unified score it wins by
-6× the margin — because coverage is now concave, lateness is charged for, and
-the quality term actually varies with depth.
+picking depth 8 and never thinking again. Under the unified score — now
+measured with real downstream mIoU, not a placeholder — it wins by **~26×**
+the legacy margin, because coverage is now concave, lateness is charged for,
+and the quality term actually varies steeply with depth.
 
 Concretely, what "concave coverage" buys: a task's **first 50% of images earns
 79.3% of its full value** (it is exactly 50% under the legacy linear score), so
@@ -177,16 +178,20 @@ number showed that.
 
 The bound carries every new term, relaxed optimistically, and `oracle.report`
 now **asserts** `bound ≥ realized` per scheduler. That check earned its keep
-immediately — it caught the offline bound double-counting already-realized
-utility in its fairness constant, which had pushed the LP bound (51.16) *above*
-the analytic ceiling (50.58). Fixed; the ordering is now ceiling 50.58 > LP
-46.22 > MILP dual 45.72 ≥ realized 44.56.
+immediately during development — it caught the offline bound double-counting
+already-realized utility in its fairness constant, which had pushed the LP
+bound above the analytic ceiling. Fixed; with the real quality table the
+ordering is ceiling 23.34 > LP 18.93 > MILP dual 18.83 ≥ realized 18.13 (the
+MILP's *incumbent* search didn't converge to a good integer solution in the
+120s budget against these steeper real coefficients — the dual bound is still
+valid and is what the gap column uses; a tighter primal incumbent is a
+follow-up, not a blocker).
 
-> ⚠️ Unified-mode numbers on this page currently use a **provisional** s_q
-> table (`config.QUALITY_TABLE_FALLBACK`), because the FLAIR segmentation
-> sweep runs on the NCSU server. Every run using it prints
-> `PROVISIONAL - NOT MEASURED` in `summary.txt`. The legacy numbers are
-> measured and unaffected.
+> ✅ Unified-mode numbers on this page are **measured**, not provisional —
+> `oec_sim/quality_table.json` from the completed FLAIR segmentation sweep on
+> the NCSU server (`flair-unet-r34-rgbie / val7050`, full results in
+> "Downstream Task Utility" below). The legacy numbers were always measured
+> and remain unaffected.
 
 ### MPC Scheduler vs. Fixed Depths vs. Hierarchical MPC
 
@@ -256,8 +261,9 @@ fidelity.
 ### Downstream Task Utility — segmentation on reconstructions
 
 The pipeline that replaces `u_q = 1 − LPIPS_q` with real downstream
-performance lives in `rq-vae/downstream/`. It is **server-side** (it needs the
-RQ-VAE checkpoint, the FLAIR GeoTIFFs and CUDA) and is written but not yet run.
+performance lives in `rq-vae/downstream/`. It runs **server-side** (needs the
+RQ-VAE checkpoint, the FLAIR GeoTIFFs and CUDA) and has now completed a full
+run against the frozen 7,050-image val population.
 
 **Hybrid 5-band design.** RQ-VAE compresses RGB only, while FLAIR's baseline
 segmenter takes RGB + NIR + Elevation. Each output raster is therefore
@@ -276,7 +282,7 @@ q ∈ {1,2,4,8,16}:
 
 | condition | what it gives |
 |---|---|
-| `--depth orig` | `mIoU_ref` — the uncompressed reference. Also the **checkpoint gate**: it must reproduce the published 0.5443, or the class-weight vector / model provider / normalization is wrong and every later number is meaningless |
+| `--depth orig` | `mIoU_ref` — the uncompressed reference. Also the **checkpoint gate**: run first, before anything costly, to catch a wrong class-weight vector / model provider / normalization before it silently corrupts every later number |
 | `--depth blank` | `mIoU_floor` — RGB bands filled with the dataset means, so the segmenter runs on **NIR + Elevation alone** |
 
 `s_q = (mIoU_q − mIoU_floor) / (mIoU_ref − mIoU_floor)`. The decision-theoretic
@@ -290,19 +296,51 @@ floor anchoring, that is the finding** — to be reported, not tuned away.
 ```bash
 # on the server, in tmux
 tmux new -s flair_sweep
-MAX_SAMPLES=500 ./downstream/run_depth_sweep.sh   # ~1 h subset first
-./downstream/run_depth_sweep.sh                   # full 7,050, ~8-10 h
+MAX_SAMPLES=500 ./downstream/run_depth_sweep.sh   # subset sanity check first
+./downstream/run_depth_sweep.sh                   # full 7,050
 ```
 
 One condition at a time, deleting reconstructions after harvest, so peak disk
-stays ~6 GB rather than the ~36 GB all six would need at once
+stays low rather than needing all six conditions' reconstructions at once
 (`recon_to_geotiff.py` also refuses to start below `--min-free-gb`; this box
-has hit 100% before). `metrics.py` is the bottleneck at ~1 h/condition — a
-serial `confusion_matrix` over 262k pixels × 7,050 patches.
+has hit 100% before). `metrics.py` is the bottleneck — a serial
+`confusion_matrix` over 262k pixels × 7,050 patches per condition.
 
-Until it lands, `config.QUALITY_TABLE_FALLBACK` supplies a clearly-labelled
-**provisional** table and every run using it prints `PROVISIONAL - NOT
-MEASURED` in `summary.txt`.
+**Results, full 7,050-image val population:**
+
+| condition | mIoU | s_q (floor-anchored) |
+|---|---|---|
+| orig (`mIoU_ref`) | 68.87% | — |
+| blank (`mIoU_floor`) | 6.08% | — |
+| q1 | 12.60% | 0.104 |
+| q2 | 17.53% | 0.182 |
+| q4 | 22.54% | 0.262 |
+| q8 | 25.68% | 0.312 |
+| q16 | 28.70% | 0.360 |
+
+Floor-anchored spread from q1 to q16 is **~247%**, against **~12%** for the
+1−LPIPS proxy it replaces — pixel fidelity was massively understating how
+much reconstruction depth actually matters for a downstream task. That's the
+core validation of grounding the utility function this way.
+
+One honest wrinkle: the checkpoint's own self-reported mIoU (58.6% for the
+15-class RGB+IR+Elevation ResNet34-UNet — see the model card at
+`IGNF/FLAIR-INC_rgbie_15cl_resnet34-unet` on HuggingFace) doesn't match
+`mIoU_ref` here. Root cause, best understanding: FLAIR-1-main ships two
+different held-out sets — the *val* split used here (a held-out-domain slice
+of the *train* data release) and a separate official *test* split (a
+different data release entirely). IGNF's published number was almost
+certainly benchmarked against the test split, not val; a domain-leakage check
+between our val population and the training domains came back clean, ruling
+out the more concerning explanation. Per-class IoU on our val population is
+structurally sane throughout (easy common classes like building/water score
+high, rare/small classes like swimming_pool score lower) — the signature of
+a correctly-loaded, working model, just evaluated against an easier
+population than IGNF's headline number. Verifying against the true test split
+would need unzipping a 14 GB test-image archive plus an unfetched test-label
+archive and predicting on 15,700 images — judged not worth it, since what the
+OEC utility needs is a self-consistent `mIoU_q` on one fixed population
+across depths, not an exact match to an external benchmark number.
 
 ### Offline Optimality Bound (HiGHS)
 
@@ -771,7 +809,7 @@ python3 visualize_kuiper_630.py       # writes ../viz_output/kuiper_630.html
 **RQ-VAE compression:**
 
 9. Complete FLAIR-1 dedicated-model sweep for depths 2 and 4 (truncation eval already covers 1/2/4/8/16)
-10. **Run** the downstream segmentation sweep on the server (`rq-vae/downstream/run_depth_sweep.sh`) — the pipeline and the `s_q` wiring are done and the simulator reads `oec_sim/quality_table.json`, but the numbers in it are still provisional until the sweep executes. Start with the checkpoint gate (must reproduce mIoU 0.5443 on the uncompressed reference)
+10. ~~Run the downstream segmentation sweep~~ — **done**: full 7,050-image val population, real `oec_sim/quality_table.json` wired in (see "Downstream Task Utility"). Follow-up if it's ever worth the time: verify `mIoU_ref` against FLAIR-1-main's official *test* split rather than val, to get a number directly comparable to IGNF's published one
 11. Run NAC entropy coding on exported FLAIR codes
 12. Run ns-3 end-to-end simulation (full Starlink scenario, ns-3 build unblocked)
 

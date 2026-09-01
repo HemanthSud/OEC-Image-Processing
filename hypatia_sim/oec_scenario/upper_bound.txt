@@ -4,8 +4,8 @@ budget is enforced; ISL/GSL rows dropped -- valid because they never bind at
 the committed rates, and dropping rows can only raise the bound further)
 ==========================================================================
 analytic ceiling (everything at best depth, instantly):    69.95
-LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.8s, status=0)
-MILP bound (integral depth, full resolution, time_limit=120s): incumbent    64.82  dual    65.23  mip_gap=0.006   (16.6s, status=1)
+LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.7s, status=0)
+MILP bound (integral depth, full resolution, time_limit=120s): incumbent    65.16  dual    65.23  mip_gap=0.001   (25.4s, status=0)
 
 scheduler          utility  gap to bound
   mpc                  64.95          0.4%

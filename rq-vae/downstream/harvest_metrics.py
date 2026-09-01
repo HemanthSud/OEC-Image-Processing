@@ -24,8 +24,8 @@ from datetime import date
 from pathlib import Path
 
 
-def read_miou(results_root, cond):
-    p = Path(results_root) / cond / 'metrics' / 'metrics.json'
+def read_miou(results_root, cond, out_model_name='recon'):
+    p = Path(results_root) / cond / out_model_name / 'metrics' / 'metrics.json'
     if not p.is_file():
         return None, None
     with open(p) as fh:

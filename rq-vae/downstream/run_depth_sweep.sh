@@ -14,7 +14,7 @@ set -euo pipefail
 
 RQ_VAE_DIR="${RQ_VAE_DIR:-$HOME/Research-clean/rq-vae}"
 FLAIR_DIR="${FLAIR_DIR:-$HOME/Research-clean/FLAIR-1-main}"
-SCRATCH="${SCRATCH:-/scratch}"
+SCRATCH="${SCRATCH:-$HOME/scratch}"
 CSV="${CSV:-downstream/flair-1-paths-val-7050.csv}"
 DEPTHS="${DEPTHS:-1 2 4 8 16}"
 MAX_SAMPLES="${MAX_SAMPLES:-}"
@@ -41,9 +41,9 @@ run_condition () {
         --recon-root "$recon" --out "$csv_out" --allow-missing 100000
   fi
 
-  sed -e "s|__TEST_CSV__|$csv_out|" -e "s|__OUT__|$OUT_ROOT/$cond|" \
-      downstream/configs/eval-recon-template.yaml \
-      > "$FLAIR_DIR/configs/eval-$cond.yaml"
+  ( cd "$FLAIR_DIR" && python3 "$RQ_VAE_DIR/downstream/make_eval_config.py" \
+      --test-csv "$csv_out" --out-folder "$OUT_ROOT/$cond" \
+      --out "configs/eval-$cond.yaml" )
   ( cd "$FLAIR_DIR" && flair --conf="configs/eval-$cond.yaml" )
 
   # delete BEFORE the next condition -- this is the disk guard that matters
@@ -51,7 +51,7 @@ run_condition () {
   echo "=== $cond done ============================================="
 }
 
-run_condition orig  orig      # mIoU_ref  -- also the checkpoint gate (~0.5443)
+# 'orig' (mIoU_ref, the checkpoint gate) already ran separately -- reuse it.
 run_condition blank blank     # mIoU_floor -- NIR+Elevation only, no usable RGB
 for d in $DEPTHS; do run_condition "q$d" "$d"; done
 

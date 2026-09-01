@@ -93,10 +93,30 @@ Both are written to `quality_table.json` so the choice stays visible and
 reversible. **If the spread is still narrow after floor anchoring, that is the
 finding** -- report it rather than tuning it away.
 
-Until the server sweep lands, `config.QUALITY_TABLE_FALLBACK` supplies a
-clearly-labelled PROVISIONAL table so `run_all` works on a laptop; every run
-that uses it prints `PROVISIONAL - NOT MEASURED` in `summary.txt`. Numbers
-quoted from unified-mode runs below inherit that caveat.
+The server sweep has landed: `oec_sim/quality_table.json` holds real
+mIoU on the full 7,050-image val population (`flair-unet-r34-rgbie`,
+`FLAIR-INC_rgbie_15cl_resnet34-unet`, floor-anchored). Measured
+$s_q$ = 0.104 / 0.182 / 0.262 / 0.312 / 0.360 at q = 1/2/4/8/16 --
+a ~247% spread from q1 to q16, against ~12% for the 1-LPIPS proxy it
+replaces. $\text{mIoU}_{\text{ref}}$ = 68.87%, $\text{mIoU}_{\text{floor}}$
+= 6.08%. `config.QUALITY_TABLE_FALLBACK` remains as a PROVISIONAL fallback
+only for environments without the real file (e.g. a laptop with no server
+access); every run that falls back to it still prints
+`PROVISIONAL - NOT MEASURED` in `summary.txt` so the two are never confused.
+
+One caveat worth recording: $\text{mIoU}_{\text{ref}}$ (68.87%) does not match
+the checkpoint's own self-reported mIoU (58.6%, its HuggingFace model card).
+Best-understood cause: FLAIR-1-main ships a held-out-domain *val* split (used
+here) and a separately-released official *test* split, and IGNF's published
+number was almost certainly benchmarked on the latter. Domain leakage between
+our val population and the training domains was checked and ruled out;
+per-class IoU is structurally sane (common classes score high, rare ones
+lower) -- the signature of correctly-loaded weights evaluated against an
+easier population, not a broken pipeline. Verifying against the true test
+split needs a 14 GB test-image archive plus an unfetched test-label archive
+and predict+metrics on 15,700 images -- judged not worth it, since the OEC
+utility only needs a self-consistent $\text{mIoU}_q$ on one fixed population
+across depths, not a match to an external benchmark.
 
 ## Unified utility (the reported score AND the objective)
 
@@ -241,9 +261,13 @@ essentially any sign or normalization mistake in the terms above. It found a
 real one during this pass: the bound is handed an already-simulated task list
 but re-plans every task from scratch, so `fair_row_coeffs` was double-counting
 `delivered_utility` as the maximin constant, letting $u_{\min}$ reach ~2 and
-pushing the LP bound (51.16) *above* the analytic ceiling (50.58). Fixed by
-passing `realized=0.0`; the ordering is now ceiling 50.58 > LP 46.22 >
-MILP dual 45.72 ≥ realized 44.56.
+pushing the LP bound (51.16) *above* the analytic ceiling (50.58, provisional
+quality table). Fixed by passing `realized=0.0`; with the provisional table
+the ordering was ceiling 50.58 > LP 46.22 > MILP dual 45.72 >= realized 44.56,
+and with the real quality table it is ceiling 23.34 > LP 18.93 > MILP dual
+18.83 >= realized 18.13 (the MILP incumbent search itself didn't converge
+within the 120s budget against the real, steeper coefficients -- the dual
+bound is still valid and is what the gap table uses).
 
 ## MPC objective (eq. 8, extended)
 

@@ -30,8 +30,12 @@ def main():
                 continue
             img, msk = rec[0], rec[1]
             if args.recon_root != 'orig':
-                src = (root / img).resolve() if not Path(img).is_absolute() \
-                    else Path(img).resolve()
+                # img already carries its own '..' hop (assumes CWD is the
+                # rq-vae dir, same as data_root's default) -- joining it onto
+                # an already-resolved data_root double-applies that hop and
+                # silently drops the leading path component (e.g.
+                # flair_aerial_train), which then never matches recon_root.
+                src = Path(img).resolve()
                 try:
                     rel = src.relative_to(root)
                 except ValueError:

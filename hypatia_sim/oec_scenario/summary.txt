@@ -70,8 +70,8 @@ Depths D        [2, 4, 8, 16]  payload b_q = 176 B, 352 B, 704 B, 1408 B
   mpc-hier         mean delay    2678s  p95    3388s  depth mix 2:18 4:19 8:19 16:8
 
 ── MPC solve-time instrumentation ───────────────────────────
-  mpc               121 solves   mean   216.8 ms   p95  1242.3 ms   max  6314.5 ms   total   26.2 s
-  mpc-hier          113 solves   mean    97.2 ms   p95   401.4 ms   max  1087.6 ms   total   11.0 s
+  mpc               121 solves   mean   152.0 ms   p95  1292.2 ms   max  2213.1 ms   total   18.4 s
+  mpc-hier          113 solves   mean    40.7 ms   p95   138.3 ms   max   538.5 ms   total    4.6 s
 
 Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,
 tasks.csv, timeline_*.csv, task_outcomes_*.csv, solve_log_*.csv,
@@ -84,8 +84,8 @@ budget is enforced; ISL/GSL rows dropped -- valid because they never bind at
 the committed rates, and dropping rows can only raise the bound further)
 ==========================================================================
 analytic ceiling (everything at best depth, instantly):    69.95
-LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.8s, status=0)
-MILP bound (integral depth, full resolution, time_limit=120s): incumbent    64.82  dual    65.23  mip_gap=0.006   (16.6s, status=1)
+LP bound   (continuous depth, 5-slot windows, 38976 vars):    65.66   (0.7s, status=0)
+MILP bound (integral depth, full resolution, time_limit=120s): incumbent    65.16  dual    65.23  mip_gap=0.001   (25.4s, status=0)
 
 scheduler          utility  gap to bound
   mpc                  64.95          0.4%
