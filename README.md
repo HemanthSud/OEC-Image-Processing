@@ -347,6 +347,57 @@ archive and predicting on 15,700 images — judged not worth it, since what the
 OEC utility needs is a self-consistent `mIoU_q` on one fixed population
 across depths, not an exact match to an external benchmark number.
 
+**The segmentation tool computes more than mIoU alone**, and the rest was
+captured but not previously surfaced — it's in
+`rq-vae/downstream/results/downstream_summary.json`. `oec_sim`'s utility
+function deliberately uses mIoU only (the formula needs one scalar quality
+signal per depth), but the fuller readout is informative on its own:
+
+| depth | mIoU | Overall Accuracy | Fscore | Precision | Recall |
+|---|---|---|---|---|---|
+| q1 | 12.60% | 28.05% | 21.18% | 39.03% | 27.74% |
+| q2 | 17.53% | 35.76% | 27.83% | 42.99% | 33.10% |
+| q4 | 22.54% | 42.79% | 34.33% | 47.37% | 38.13% |
+| q8 | 25.68% | 46.96% | 38.11% | 50.56% | 41.26% |
+| q16 | 28.70% | 50.77% | 41.64% | 52.91% | 44.31% |
+
+Every one of these climbs smoothly and monotonically with depth — the same
+"structurally sane" signature as the mIoU numbers above, not noise.
+
+**Per-class breakdown is where the real story is.** Ranking all 15 FLAIR
+land-cover classes by how much of their IoU they lose going from the best
+depth (q16) to the worst (q1):
+
+| class | IoU @ q1 | IoU @ q16 | relative loss at q1 |
+|---|---|---|---|
+| swimming_pool | 0.0 | 1.7 | **99%** |
+| coniferous | 0.5 | 3.7 | **87%** |
+| deciduous | 8.6 | 41.1 | **79%** |
+| pervious surface | 5.1 | 18.4 | 72% |
+| impervious surface | 9.7 | 33.0 | 71% |
+| snow | 6.1 | 18.0 | 66% |
+| plowed land | 14.0 | 37.9 | 63% |
+| water | 20.8 | 51.2 | 59% |
+| building | 21.8 | 48.9 | 55% |
+| bare soil | 15.3 | 32.5 | 53% |
+| vineyard | 23.1 | 43.6 | 47% |
+| brushwood | 2.0 | 3.6 | 45% |
+| herbaceous vegetation | 20.0 | 33.4 | 40% |
+| agricultural land | 33.4 | 51.5 | 35% |
+| greenhouse | 8.6 | 11.9 | 28% |
+
+**Fine-detail classes collapse hardest under heavy compression; broad,
+large-area classes hold up.** Swimming pools, conifers, and deciduous trees
+lose 70–99% of their achievable accuracy at the shallowest depth; large
+contiguous classes like agricultural land and greenhouse lose 28–35%. This
+tracks physical intuition — heavy compression destroys fine texture first,
+and fine texture is exactly what separates a swimming pool from a driveway,
+or one tree species from another. It's a second, independent line of
+evidence for why grounding the utility function in a real downstream task
+mattered: the damage from over-compression isn't uniform, and a pixel-level
+metric like LPIPS has no way to see that some classes are far more fragile
+than others.
+
 ### Offline Optimality Bound (HiGHS)
 
 `oec_sim/oracle.py` computes two valid upper bounds — dropping ISL/GSL rows
