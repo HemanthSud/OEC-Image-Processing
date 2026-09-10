@@ -2,6 +2,10 @@
 
 Research project evaluating on-board satellite image compression using Residual Quantized Variational Autoencoders (RQ-VAE) under realistic LEO downlink constraints, with LEO network simulation via the Hypatia simulator.
 
+> **New to this project?** [Orbit School](https://claude.ai/code/artifact/3c074b01-1f64-4eae-bb60-e83be00b75dc)
+> is a from-zero primer covering every concept below (compression depth, MPC,
+> mIoU, routing, ...) tied back to this project's own numbers.
+
 | | |
 |---|---|
 | Lab | NICE Lab, North Carolina State University |
@@ -109,6 +113,10 @@ notation.
 > is a one-page readout of the headline result below — the margin between MPC
 > and a fixed depth choice, before and after grounding quality in a real
 > downstream task instead of pixel fidelity.
+>
+> **Full synthesis:** [Signal & Depth](https://claude.ai/code/artifact/c044ebf4-4a26-4c6b-ba50-7daa08da6c32)
+> covers the complete 10-scheduler fabric-limited comparison, decision
+> distributions, and the route-freezing negative result, with every table.
 
 ### Unified Utility — one number that balances all the factors
 
