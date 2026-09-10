@@ -1,0 +1,168 @@
+\section{Unified Utility: Baselines, Method, and Variants}
+\label{sec:utility-results}
+
+\subsection{Legacy vs.\ unified utility: not the same scale}
+
+Two utility functions are implemented, selected by \texttt{--utility
+legacy|unified}. \textbf{Legacy} is a single weighted quality-times-freshness
+sum with no tardiness, cost, or fairness term, using a pixel-fidelity
+quality proxy ($1-\text{LPIPS}$). \textbf{Unified} adds a tardiness penalty,
+a resource-cost penalty, and a maximin fairness floor, and replaces the
+proxy with the measured downstream mIoU term $s_q$ from
+\S\ref{sec:downstream} (full formulation in \S\ref{sec:formulation}). These
+two modes are \emph{not} on the same scale and must not be compared directly
+in a single table; Table~\ref{tab:legacy-vs-unified} reports each mode's
+own best-fixed-depth-greedy vs.\ MPC margin, from the \texttt{gbs-limited}
+scenario, to show how switching the quality term changes the conclusion.
+
+\begin{table}[h]
+\centering
+\caption{MPC vs.\ best fixed-depth greedy, gbs-limited scenario, seed 42.}
+\label{tab:legacy-vs-unified}
+\begin{tabular}{lrrr}
+\toprule
+Utility mode & \texttt{mpc} & best fixed greedy & MPC margin \\
+\midrule
+legacy ($1-\text{LPIPS}$ quality) & 64.95 & 64.15 (fixed-8) & $+1.2\%$ \\
+unified (real mIoU quality)       & 18.13 & 13.71 (fixed-8) & $+32.2\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Under the pixel-fidelity proxy, MPC essentially ties the best fixed-depth
+greedy baseline. Once quality reflects the real downstream task, MPC's
+percentage margin is $\approx 26\times$ larger. This is the central result
+motivating the unified utility: the legacy proxy under-states MPC's value
+because it is nearly flat across compression depths (\S\ref{sec:downstream}).
+
+\subsection{Compared algorithms}
+
+\begin{itemize}
+\item \textbf{greedy-fixed-\{2,4,8,16\}}: always encode at a fixed depth,
+  transmit whatever fits in the current slot's remaining capacity.
+\item \textbf{greedy-adaptive}: greedy, but adapts encode depth to queue
+  length.
+\item \textbf{mpc}: flat rolling-horizon MILP (\S\ref{sec:formulation}),
+  static shortest-path routing.
+\item \textbf{mpc-congestion}: flat MPC with predictive, congestion-aware
+  routing (M/M/1-style edge cost, iterated to a fixed point).
+\item \textbf{mpc-hier}\todoconfirm{scope of this variant to keep/drop is
+  pending Xuanhao's confirmation, see note below}: two-level hierarchy —
+  a slow admission/budget LP plus a fast per-task depth MILP, with explicit
+  task drop/abandon logic.
+\item \textbf{mpc-hier-route}: \texttt{mpc-hier} plus a routing MPC that
+  freezes a concrete path per 10-minute macro-epoch.
+\item \textbf{mpc-2level}: a routing MPC (multicommodity-flow LP over
+  candidate paths) and the depth MPC iterated to a fixed point as
+  \emph{peers}, not hierarchically.
+\end{itemize}
+
+\todoconfirm{Xuanhao's email asked to drop ``the previous mpc-hier results
+where the two MPCs are both used for depth selection.'' \texttt{FORMULATION.md}
+describes \texttt{mpc-hier}'s two levels as: upper = LP over a
+\emph{continuous relaxed depth} $x_{k,q}\in[0,1]$ (for budgeting), lower =
+MILP over \emph{integral depth} $x_{k,q}$ -- i.e.\ both levels of
+\texttt{mpc-hier} specifically operate on depth, with static routing at
+both. This is different from \texttt{mpc-hier-route}/\texttt{mpc-2level},
+which are an explicit routing-MPC + depth-MPC split. This textual match
+makes \texttt{mpc-hier} the likely candidate for what Xuanhao means, but all
+schedulers are reported below pending his direct confirmation --
+see \S\ref{sec:hier} for the full two-level description.}
+
+\subsection{Ten schedulers, one run}
+
+Table~\ref{tab:scheduler-comparison} reports all ten schedulers on the
+\texttt{fabric-limited} scenario (where routing choices are measurable),
+unified utility, real mIoU quality table, single run/seed (42). Every row is
+from the same run, so utility, delivery, on-time rate, and bound-gap are
+directly comparable across schedulers.
+
+\begin{table}[h]
+\centering
+\caption{Scheduler comparison, fabric-limited scenario, seed 42. Bound
+(offline HiGHS upper bound, \S\ref{sec:formulation}) $= 18.99$.}
+\label{tab:scheduler-comparison}
+\begin{tabular}{lrrrr}
+\toprule
+Scheduler & Utility & Delivery\% & On-time\% & Gap to bound \\
+\midrule
+greedy-fixed-2   & 6.43  & 100\% & 88.7\% & 66.1\% \\
+greedy-fixed-4   & 11.08 & 100\% & 88.7\% & 41.7\% \\
+greedy-fixed-8   & 13.71 & 100\% & 88.6\% & 27.8\% \\
+greedy-fixed-16  & 8.80  & 100\% & 81.5\% & 53.7\% \\
+greedy-adaptive  & 8.80  & 100\% & 81.5\% & 53.7\% \\
+mpc              & 18.76 & 87.9\% & 86.3\% & 1.2\% \\
+mpc-congestion   & 18.86 & 89.3\% & 87.6\% & 0.7\% \\
+mpc-hier         & 14.76 & 78.7\% & 75.0\% (39 dropped) & 22.3\% \\
+mpc-hier-route   & 14.78 & 81.9\% & 78.6\% (40 dropped) & 22.2\% \\
+\textbf{mpc-2level} & \textbf{18.90} & \textbf{90.3\%} & \textbf{88.6\%} & \textbf{0.5\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Note:} \texttt{greedy-adaptive}'s row is numerically identical to
+\texttt{greedy-fixed-16} in this run — in this scenario, the adaptive
+policy's depth choice converges to always selecting depth 16, so this is a
+genuine coincidence in the underlying decisions (verified in
+\S\ref{sec:decisions}), not a duplicated row.
+
+\subsection{Individual utility components}
+
+Table~\ref{tab:utility-components} decomposes total utility into its four
+additive terms, from the same run as Table~\ref{tab:scheduler-comparison}
+(\texttt{hypatia\_sim/oec\_scenario\_couplings/summary.txt}).
+$U = \text{quality} - \text{tardy} - \text{cost} + \text{fair}$; $u_{\min}$
+is the optimized maximin fairness floor and Jain's index is reported as a
+diagnostic only (not MILP-representable, so not itself optimized; see
+\S\ref{sec:formulation}).
+
+\begin{table}[h]
+\centering
+\caption{Utility component decomposition, fabric-limited scenario, seed 42.}
+\label{tab:utility-components}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Scheduler & Total & Quality & $-$Tardy & $-$Cost & $+$Fair & $u_{\min}$ & Jain & Enc.\ (kJ) \\
+\midrule
+mpc              & 18.757 & 16.344 & $-$0.029 & $-$2.121 & 4.564  & 0.7131  & 0.9978 & 4170.2 \\
+greedy-adaptive  & 8.797  & 16.170 & $-$1.502 & $-$2.350 & $-$3.521 & $-$0.5502 & 0.9118 & 4742.3 \\
+greedy-fixed-2   & 6.431  & 8.414  & $-$0.813 & $-$1.322 & 0.152  & 0.0237  & 0.9331 & 4742.3 \\
+greedy-fixed-4   & 11.076 & 12.089 & $-$0.813 & $-$1.469 & 1.269  & 0.1983  & 0.9670 & 4742.3 \\
+greedy-fixed-8   & 13.711 & 14.394 & $-$0.814 & $-$1.763 & 1.894  & 0.2959  & 0.9748 & 4742.3 \\
+greedy-fixed-16  & 8.797  & 16.170 & $-$1.502 & $-$2.350 & $-$3.521 & $-$0.5502 & 0.9118 & 4742.3 \\
+mpc-congestion   & 18.864 & 16.447 & $-$0.028 & $-$2.151 & 4.597  & 0.7182  & 0.9985 & 4235.1 \\
+mpc-hier         & 14.761 & 13.743 & $-$0.085 & $-$1.536 & 2.639  & 0.4124  & 0.9846 & 3733.3 \\
+\textbf{mpc-2level} & \textbf{18.898} & \textbf{16.503} & $-$0.030 & $-$2.173 & 4.597 & \textbf{0.7183} & 0.9987 & 4281.9 \\
+mpc-hier-route   & 14.779 & 13.811 & $-$0.055 & $-$1.561 & 2.584  & 0.4038  & 0.9848 & 3885.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{What drives the gap: admission control, not routing.}
+\texttt{mpc-2level} wins outright, but \texttt{mpc-congestion} (predictive
+routing only, no full flow-optimization) sits within 0.04 utility of it. A
+five-point ISL-rate sweep (\S\ref{sec:sweeps}) found the dedicated
+routing-LP's own marginal contribution tops out at $+0.84\%$ utility and is
+exactly zero above 1.5\,Mbps ISL. The real, structural $\approx 5$-point gap
+is between the no-admission-control family (\texttt{mpc},
+\texttt{mpc-congestion}, \texttt{mpc-2level}, $\approx 18.8$--$18.9$) and the
+admission-control family (\texttt{mpc-hier}, \texttt{mpc-hier-route},
+$\approx 14.8$) — whether to drop a task early matters far more than how
+cleverly the kept tasks are routed.
+
+\textbf{Route-freezing does not survive a LEO fabric.} A route frozen for a
+10-minute macro-epoch (\texttt{mpc-hier-route}) is usable at its
+actually-executed slot only 7.7\% of the time, because ground-station
+contact windows (227--265\,s, Table~\ref{tab:constellation}) are shorter
+than any freeze period worth having. This is a structural property of the
+constellation geometry, not a tuning failure.
+
+\subsection{Solve-time and energy efficiency}
+
+\texttt{mpc-hier}/\texttt{mpc-hier-route} solve $3$--$4\times$ faster per
+call (mean 43.5--43.6\,ms) than the flat/two-level MPCs (123.9--168.5\,ms
+mean, up to 3{,}088\,ms max for \texttt{mpc-2level}), at the cost of the
+utility gap above. \texttt{mpc-2level} solves 365 times over the run
+(vs.\ 113--121 for the other MPC variants), for 45.2\,s total solve time
+vs.\ 20.4\,s for flat \texttt{mpc} — recall from \S\ref{sec:setup} that these
+are individual-solve statistics summed, not simulated wall-clock time.

@@ -1,0 +1,115 @@
+\section{Experimental Setup}
+\label{sec:setup}
+
+This section specifies every parameter needed to reproduce the results in
+this paper from the same simulator (\texttt{hypatia\_sim/oec\_sim/}, built on
+the Hypatia LEO orbital-mechanics/topology engine).
+
+\subsection{Constellation and ground segment}
+
+Table~\ref{tab:constellation} lists the physical scenario parameters
+(\texttt{hypatia\_sim/oec\_sim/config.py}). Four named constellations are
+implemented (\texttt{kuiper-630}, \texttt{starlink-550}, \texttt{telesat-1015},
+\texttt{small-walker}); all results in this paper use \texttt{kuiper-630}
+unless stated otherwise.
+
+\begin{table}[h]
+\centering
+\caption{Constellation, link, and task-load parameters.}
+\label{tab:constellation}
+\begin{tabular}{ll}
+\toprule
+Parameter & Value \\
+\midrule
+Constellation & Kuiper-630 shell 1: Walker-delta $1156/34/1$ (34 planes $\times$ 34 sats) \\
+Altitude / inclination & 630\,km / $51.9^\circ$ \\
+Orbital period & 5{,}830\,s \\
+Ground stations $G$ & Tokyo, New York, S\~ao Paulo, Sydney (4 total), min.\ elevation $20^\circ$ \\
+ISL topology & +Grid, 2{,}312 candidate links; feasible if graze altitude $>80$\,km \\
+             & above Earth's surface \emph{and} range $\le 5{,}016$\,km \\
+Areas of interest & 8 (California-fires, Amazon-basin, Sahel, Ganges-delta, \\
+                   & Barrier-reef, Dnipro-basin, and 2 more; see \texttt{config.py:AOIS}) \\
+Tasks per run $|K|$ & 64, one per (AOI, publication event), Poisson-triggered \\
+Images per task $N_k$ & $\sim \mathcal{U}(100{,}000,\ 300{,}000)$, total $\approx 12.81$M images \\
+Task weight $w_k$ & $\in \{1, 2, 3\}$ \\
+Random seed & 42 (task generation; sweeps in \S\ref{sec:sweeps} use 5 seeds) \\
+Simulation horizon & 18{,}000\,s (5\,h, $\approx 3.1$ orbits) \\
+Slot length $\Delta t$ & 30\,s $\Rightarrow$ 601 decision slots \\
+MPC planning horizon $H$ & 60 slots (30\,min look-ahead) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Link capacity regimes}
+
+Two named capacity regimes share the identical topology and task model but
+rebalance link rates to make different resources binding
+(Table~\ref{tab:regimes}). \textbf{gbs-limited} is the default and is used
+for the legacy-vs-unified utility comparison in \S\ref{sec:utility-results};
+its per-GBS aggregate budget is $\ge 12\times$ tighter than any ISL segment a
+route could cross, so ISL contention is mathematically unreachable there.
+\textbf{fabric-limited} throttles the ISL rate specifically so routing
+decisions have a measurable effect, and is used for the ten-scheduler
+comparison in \S\ref{sec:utility-results} and the decision-distribution
+analysis in \S\ref{sec:decisions}.
+
+\begin{table}[h]
+\centering
+\caption{Link capacity regimes (\texttt{config.py:\_SCENARIOS}).}
+\label{tab:regimes}
+\begin{tabular}{lrrr}
+\toprule
+Regime & ISL rate & GSL rate (per sat--GBS pair) & GBS aggregate rate \\
+\midrule
+gbs-limited (default) & 100\,Mbps & 100\,Mbps & 2\,Mbps \\
+fabric-limited         & 1\,Mbps   & 50\,Mbps  & 500\,Mbps \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Compression depths and payload}
+
+Each task-image is encoded on board at one of $D = \{2, 4, 8, 16\}$
+RQ-VAE residual-quantization depths before downlink. Payload scales linearly
+with depth, $b_q = 88q$ bytes (measured on the FLAIR-1 $8{\times}8$ dedicated
+models, \S\ref{sec:compression}): $b_2 = 176$\,B, $b_4 = 352$\,B,
+$b_8 = 704$\,B, $b_{16} = 1{,}408$\,B. On-board encode time is
+$12.34\,\text{ms}\,\pm\,0.03$--$0.05\,\text{ms}$ per image and is
+\emph{depth-independent} (measured identically at $8{\times}8{\times}1$ and
+$8{\times}8{\times}8$), giving an encoder throughput of 81 images/s per
+satellite regardless of the depth chosen.
+
+\subsection{Decision cadence: what ``every 30\,s'' actually means}
+
+The scheduling slot is $\Delta t = 30$\,s, but the MPC does \emph{not}
+re-solve its optimization every slot. Each solve plans $H=60$ slots (30\,min)
+ahead and commits only to the first slot of that plan; the scheduler
+re-solves only when either 5 slots have elapsed since the last solve, or a
+new task arrives — otherwise it executes the next committed step of the
+existing plan. Over the full 601-slot (5-hour) simulation, the flat
+\texttt{mpc} scheduler solves the optimization approximately 121 times, not
+601 times. \textbf{Reported solve-time statistics (mean/p95/max) are for a
+single individual solve} (how long the optimizer takes to think once); a
+separately reported \emph{total} solve-time figure is the sum of individual
+solve times across the whole run — total compute time spent solving, not
+wall-clock simulation time and not a per-slot cost.
+
+\subsection{Software and solver}
+
+The scheduling MILPs/LPs (flat MPC, hierarchical admission/budget LP, the
+two-level routing LP, and the offline oracle bound) are solved with HiGHS via
+\texttt{scipy.optimize.linprog}/\texttt{milp}. Orbital mechanics, contact
+windows, and link feasibility come from Hypatia's satellite-generation and
+topology modules (\texttt{hypatia/satgenpy}), vendored unmodified.
+
+\subsection{Quality-table provenance}
+
+The utility function's quality term $s_q$ (\S\ref{sec:utility-results},
+\S\ref{sec:formulation}) is grounded in measured downstream FLAIR-1
+segmentation mIoU, source label \texttt{flair-unet-r34-rgbie / val7050 /
+2026-08-31} (full 7{,}050-image validation population; see
+\S\ref{sec:compression} for the measurement itself). All results in
+\S\ref{sec:utility-results} and \S\ref{sec:decisions} use this real,
+measured table (\texttt{hypatia\_sim/oec\_sim/quality\_table.json}), not the
+placeholder fallback (\texttt{config.QUALITY\_TABLE\_FALLBACK}) that the code
+falls back to when this file is absent.

@@ -1,0 +1,90 @@
+\section{Introduction}
+\label{sec:intro}
+
+A satellite in low Earth orbit (LEO) can observe far more of the ground
+than it can ever report. A single imaging pass over a wildfire, a flood,
+or an agricultural region can generate far more raw pixels than the
+satellite's downlink budget can move to a ground station before the next
+useful decision has to be made — and a LEO satellite is only in radio
+contact with any one ground station for a few minutes at a time before it
+drops below the horizon. Someone, or something, has to decide which
+images matter most, how aggressively to compress each one, and when to
+send it. \emph{Orbital Edge Computing} (OEC) is the idea of making some of
+that decision on board the satellite itself — compressing and
+prioritizing at the edge of the network, rather than shipping raw data
+down and sorting it out on the ground.
+
+This paper studies that decision problem end to end: an on-board
+residual-quantized variational autoencoder (RQ-VAE) compresses each image
+at one of several selectable \emph{depths} (more refinement passes, larger
+payload, higher fidelity), and a rolling-horizon Model Predictive Control
+(MPC) scheduler decides, for every task competing for downlink capacity,
+which depth to use and when and along which route to transmit it, under a
+constellation topology and ground-station contact schedule that changes
+every scheduling slot.
+
+\paragraph{The problem with grading a scheduler on how the image looks.}
+The natural way to score a compression-and-scheduling policy is to ask
+whether the reconstructed image still \emph{looks} like the original —
+standard fidelity metrics such as PSNR and LPIPS answer exactly that
+question. But for a mission whose actual goal is to extract information
+from the imagery (what land-cover class is this, where is the flood
+boundary), \emph{looking similar} and \emph{remaining useful for the task}
+are not the same property, and this paper's first and most consequential
+finding is that they diverge sharply here: pixel-fidelity quality changes
+by only $12\%$ across the compression-depth range we test, while the
+imagery's usefulness for a real downstream semantic-segmentation task
+changes by $247\%$ over the identical range (\S\ref{sec:downstream}). A
+scheduler rewarded on the flat proxy has almost nothing to gain by
+reasoning carefully about depth; a scheduler rewarded on the true
+task-relevant signal has a great deal to gain. This single substitution —
+replacing a pixel-fidelity proxy with a measured downstream-task quality
+signal — changes MPC's measured advantage over the best fixed-depth
+baseline from a marginal $1.2\%$ to a substantial $32.2\%$ in an otherwise
+identical experiment (\S\ref{sec:utility-results}).
+
+\paragraph{Contributions.} Concretely, this paper:
+\begin{enumerate}
+\item grounds a scheduling utility function's quality term in
+  \emph{measured} downstream semantic-segmentation mIoU rather than pixel
+  fidelity, and shows this changes not just the numbers but the
+  qualitative conclusion about whether intelligent scheduling matters
+  (\S\ref{sec:compression}, \S\ref{sec:utility-results});
+\item presents a single \emph{unified utility function} — quality,
+  tardiness, resource cost, and a fairness floor, combined so that the
+  resulting optimization stays a mixed-integer \emph{linear} program with
+  no auxiliary binary variables — that replaces five previously
+  disagreeing scoring definitions used across the scheduler, the offline
+  bound, and two prior hierarchical variants (\S\ref{sec:formulation});
+\item evaluates ten schedulers — four fixed-depth and one adaptive greedy
+  baseline, a flat rolling-horizon MPC, a congestion-aware routing
+  variant, and two ways of coupling a dedicated routing optimizer to the
+  depth decision (hierarchical and two-level/peer) — against a
+  three-tiered offline optimality bound, under two link-capacity regimes
+  designed to make different resources binding (\S\ref{sec:setup},
+  \S\ref{sec:utility-results});
+\item shows, from the resulting depth-selection decisions and a
+  link-rate sensitivity sweep, that \emph{admission control} — deciding
+  early to drop a task rather than let it starve — is what separates the
+  strongest and weakest MPC variants, not how cleverly the kept tasks are
+  routed (\S\ref{sec:decisions}, \S\ref{sec:sweeps}); and
+\item reports a structural, not tunable, negative result: freezing a
+  concrete route for a multi-minute planning epoch is usable at its own
+  executed slot only a small fraction of the time, because ground-station
+  contact windows in this constellation are shorter than any freeze period
+  worth having (\S\ref{sec:formulation}, \S\ref{sec:utility-results}); and
+  we additionally evaluate a learned (PPO) scheduling policy as a
+  compute-cost point of comparison to MPC (\S\ref{sec:rl}).
+\end{enumerate}
+
+\paragraph{Roadmap.} \S\ref{sec:related-work} situates this work relative
+to orbital edge computing, learned image compression, and MPC-based
+network scheduling. \S\ref{sec:formulation} gives the system model and the
+full scheduling formulation, including every MPC variant evaluated later.
+\S\ref{sec:setup} specifies the simulated constellation, link-capacity
+regimes, and task workload used to reproduce every subsequent result.
+\S\ref{sec:compression}--\S\ref{sec:rl} present results: compression and
+downstream-task quality, the unified-utility scheduler comparison,
+depth-selection decision distributions, link-rate sensitivity, and the
+learned-policy baseline, in that order. \S\ref{sec:conclusion} summarizes
+and discusses what remains open.
