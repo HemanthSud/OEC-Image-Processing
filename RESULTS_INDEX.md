@@ -38,12 +38,13 @@ same sitting — don't rely on remembering it later.
 |---|---|---|---|
 | Orbit School — from-zero primer covering every concept in the project | n/a (a teaching aid, not a new result — see its own footer: "nothing here was re-run") | **[Orbit School](https://claude.ai/code/artifact/3c074b01-1f64-4eae-bb60-e83be00b75dc)** — **now linked at the top of README**, this session | Current as of 2026-09-09 |
 
-## Paper drafts (not yet public)
+## Paper drafts
 
 | Result | Source of truth | Shared via | Status |
 |---|---|---|---|
-| Local "experimental report" (setup/compression/utility/decisions/sweeps) | `paper/report.tex` + `paper/sections/*.tex` | **Not pushed anywhere** — untracked by git, not on Overleaf | Draft. See the paper-restructuring plan for next steps. |
-| Overleaf `OEC-RQ-NAC` (Xuanhao's formulation skeleton) | https://www.overleaf.com/project/6a4917ebb65d67631b69b266 | Shared with Hemanth by Xuanhao (March 2025) | System model + MPC objective only, 2 pages. Not yet merged with the local experimental report. |
+| Full paper draft (Intro/Related Work/Formulation/Setup/Results/Conclusion, all results + RL baseline) | `paper/main.tex` + `paper/sections/*.tex` + `paper/reference.bib`, committed on branch `worktree-results-index` | **[Downlink-Constrained OEC Scheduling](https://www.overleaf.com/project/6aa2308f7350f82cc629c600)** — new Overleaf project created 2026-09-10, separate from `OEC-RQ-NAC` | Draft, compiles clean (18 pages). Intro/Related Work drafted without the two reference papers Xuanhao sent (not available in-session) — flagged for revision once shared. All `\pending`/`\todoconfirm` flags from the local draft carried over unchanged. |
+| Original local "experimental report" (setup/compression/utility/decisions/sweeps) | `paper/report.tex` + `paper/sections/*.tex` (original, untracked location: `~/Documents/Research-clean/paper/`) | Not pushed anywhere itself — superseded by the full paper draft above, which reuses its content | Superseded — kept as the historical source, not a separate active draft. |
+| Overleaf `OEC-RQ-NAC` (Xuanhao's formulation skeleton) | https://www.overleaf.com/project/6a4917ebb65d67631b69b266 | Shared with Hemanth by Xuanhao (March 2025) | System model + MPC objective only, 2 pages. Left untouched — the new full paper is a separate Overleaf project, not a push into this one. |
 
 ## Not research (excluded from this index on purpose)
 
