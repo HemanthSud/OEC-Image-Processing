@@ -1,51 +1,8 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-This paper studied on-board compression depth and downlink scheduling for
-Orbital Edge Computing as one coupled decision problem, and found that the
-choice of \emph{quality signal} used to reward that decision matters more
-than any single scheduler design choice tested. Grounding utility in
-measured downstream segmentation performance rather than pixel fidelity
-changed MPC's measured advantage over the best fixed-depth baseline from a
-marginal $1.2\%$ to a substantial $32.2\%$, because pixel fidelity is
-nearly flat across the compression-depth range studied here while
-task-relevant quality is not ($+12\%$ vs.\ $+247\%$). A scheduler is only
-as good as the signal it is scored against.
+The main thing this paper found is that the quality signal a scheduler is rewarded on matters more than any single scheduler design choice we tested. Grounding utility in measured downstream segmentation performance instead of pixel fidelity took MPC's advantage over the best fixed-depth baseline from a marginal $1.2\%$ to $32.2\%$, because pixel fidelity barely moves across the depth range studied here while task-relevant quality moves a lot ($12\%$ vs.\ $247\%$). A scheduler is only as good as what it's being asked to optimize.
 
-With that signal in place, a single unified utility function reconciled
-five previously disagreeing scoring definitions, and a ten-scheduler
-comparison under a deliberately routing-sensitive capacity regime showed
-that the strongest variant (\texttt{mpc-2level}, a routing MPC and a depth
-MPC solved as peers) closes to within $0.5\%$ of the offline optimality
-bound. The more consequential finding, however, was architectural rather
-than numerical: the $\approx 5$-point utility gap that separates the
-strongest and weakest MPC variants tracks \emph{admission control}
-(whether a scheduler explicitly drops an overwhelmed task rather than let
-it rot in queue), not routing sophistication — the dedicated routing
-optimizer's own marginal contribution tops out at $+0.84\%$ utility and
-disappears entirely once link rates are not scarce. A related structural
-result is that freezing a concrete route for longer than a few minutes
-does not survive this constellation's short ground-contact windows,
-regardless of how that freeze period is tuned. Finally, a learned (PPO)
-policy traded a consistent $5$--$8\%$ utility gap for a
-$250$--$400\times$ reduction in per-decision compute time, with an
-unanticipated caveat: without a congestion feature in its observation, its
-apparent robustness to link scarcity is accidental rather than adaptive.
+With that signal fixed, a single unified utility function replaced five scoring definitions that used to disagree, and the ten-scheduler comparison under a routing-sensitive capacity regime showed the strongest variant (\texttt{mpc-2level}, routing and depth solved as peers) landing within $0.5\%$ of the offline optimality bound. The more interesting result was architectural: the $\approx 5$-point utility gap between the strongest and weakest MPC variants tracks admission control -- whether a scheduler is willing to drop an overwhelmed task rather than let it rot in queue -- not routing sophistication. The dedicated routing optimizer's own contribution tops out at $+0.84\%$ utility and disappears once link rates aren't scarce. Freezing a concrete route for more than a few minutes also doesn't survive this constellation's short ground-contact windows, no matter how the freeze period is tuned. And a learned (PPO) policy traded a consistent $5$--$8\%$ utility gap for $250$--$400\times$ less compute time per decision, with a catch nobody had predicted going in: without a congestion feature in its observation, its apparent robustness to link scarcity turns out to be accidental rather than adaptive.
 
-\paragraph{What remains open.} Several results in this paper are
-explicitly flagged, not silently finalized: the uncompressed-reference
-mIoU used to anchor the quality signal has not been verified against
-FLAIR-1's official held-out test split (\S\ref{sec:downstream}); the scope
-of \texttt{mpc-hier} relative to Xuanhao's request to drop certain prior
-results is pending his direct confirmation (\S\ref{sec:utility-results});
-and both link-rate sensitivity sweeps in \S\ref{sec:sweeps} were generated
-against a placeholder quality table and need to be rerun against the real,
-measured one before their exact numbers are reported as final. The
-proposed satellite-count and ground-station-count sweeps
-(\S\ref{sec:sweeps}) and a retraining of the PPO baseline under the
-unified reward (\S\ref{sec:rl}) are natural next steps that require no new
-code, only additional runs. None of these open items affect the paper's
-central conclusion — that a scheduler's measured value depends first on
-what it is being asked to optimize, and only second on how cleverly it
-optimizes it — but resolving them would sharpen every number built on top
-of that conclusion.
+Several things here are flagged rather than treated as settled. The uncompressed-reference mIoU used to anchor the quality signal hasn't been checked against FLAIR-1's official test split (\S\ref{sec:downstream}). Whether \texttt{mpc-hier} is the variant Xuanhao asked to drop is still pending his confirmation (\S\ref{sec:utility-results}). Both link-rate sweeps in \S\ref{sec:sweeps} were run against a placeholder quality table and need to be rerun against the real one before their exact numbers are final. The proposed satellite-count and ground-station-count sweeps, and retraining PPO under the unified reward, are next steps that need no new code, just more runs. None of that changes the central conclusion -- what a scheduler is optimized for matters before how well it optimizes it -- but resolving it would sharpen every number downstream of that conclusion.

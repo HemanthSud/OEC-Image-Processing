@@ -1,75 +1,28 @@
 \section{System Model and Problem Formulation}
 \label{sec:formulation}
 
-This section states the system model and scheduling formulation
-implemented and evaluated in this paper. It builds directly on the
-original system-and-task model and rolling-horizon MPC objective
-(satellites $\mathcal{S}$, GBSs $\mathcal{G}$, tasks $\mathcal{K}$, depths
-$\mathcal{D}$, and the basic MPC structure), extending it with the
-concrete quality signal, unified multi-term utility, and additional
-scheduler variants (congestion-aware routing, two-level and hierarchical
-MPC couplings, and an offline optimality bound) evaluated in
-\S\ref{sec:setup} onward. Every symbol below matches the implementation
-(\texttt{hypatia\_sim/oec\_sim/}) exactly; any place where an earlier
-design intent and the shipped code differ is flagged inline rather than
-silently resolved.
+This section states the system model and scheduling formulation this project implements. It builds directly on the original system-and-task model and rolling-horizon MPC objective (satellites $\mathcal{S}$, GBSs $\mathcal{G}$, tasks $\mathcal{K}$, depths $\mathcal{D}$, and the basic MPC structure), extending it with a concrete quality signal, a unified multi-term utility, and additional scheduler variants -- congestion-aware routing, two-level and hierarchical MPC couplings, and an offline optimality bound -- that later sections evaluate. Every symbol below matches the implementation (\texttt{hypatia\_sim/oec\_sim/}) exactly; anywhere an earlier design intent and the shipped code differ, it's flagged inline instead of silently resolved.
 
 \subsection{Sets, time, and links}
 
-We consider a LEO orbital edge computing network consisting of a set of
-satellites $\mathcal{S}$ and a set of ground base stations (GBSs)
-$\mathcal{G}$. Time is divided into equal scheduling slots
-$t \in \mathcal{T}$, each of duration $\Delta t$. Because satellites move,
-the network topology is time-varying: let $\mathcal{E}_t$ denote the set
-of available inter-satellite links (ISLs) and satellite-to-ground links at
-slot $t$, where each available link $(i,j) \in \mathcal{E}_t$ has capacity
-$C_{ij}(t)$, obtainable from predicted contact windows and link states. In
-this paper, $\mathcal{S}$ is a $1{,}156$-satellite Kuiper-630-shell Walker
-constellation, $\mathcal{G}$ is a 4-city ground segment, $\Delta t = 30$\,s,
-and $\mathcal{E}_t$ is gated by a line-of-sight/range test for ISLs and an
-elevation test for ground links — full numeric values are in
-Table~\ref{tab:constellation} (\S\ref{sec:setup}).
+We consider a LEO orbital edge computing network consisting of a set of satellites $\mathcal{S}$ and a set of ground base stations (GBSs) $\mathcal{G}$. Time is divided into equal scheduling slots $t \in \mathcal{T}$, each of duration $\Delta t$. Because satellites move, the network topology is time-varying: let $\mathcal{E}_t$ denote the set of available inter-satellite links (ISLs) and satellite-to-ground links at slot $t$, where each available link $(i,j) \in \mathcal{E}_t$ has capacity $C_{ij}(t)$, obtainable from predicted contact windows and link states. In this paper, $\mathcal{S}$ is a $1{,}156$-satellite Kuiper-630-shell Walker constellation, $\mathcal{G}$ is a 4-city ground segment, $\Delta t = 30$\,s, and $\mathcal{E}_t$ is gated by a line-of-sight/range test for ISLs and an elevation test for ground links -- full numeric values are in Table~\ref{tab:constellation} (\S\ref{sec:setup}).
 
 \subsection{Tasks and compression depths}
 
-A set of image-transmission tasks $\mathcal{K}$ is generated when
-satellites observe fixed areas of interest. Each task $k \in \mathcal{K}$
-is characterized by its source satellite $s_k$, destination GBS $g_k$,
-arrival time $a_k$, number of images $N_k$, importance weight $w_k$, and
-soft deadline $d_k$. Each task is compressed using one effective RQ-VAE
-depth selected from
+A set of image-transmission tasks $\mathcal{K}$ is generated when satellites observe fixed areas of interest. Each task $k \in \mathcal{K}$ is characterized by its source satellite $s_k$, destination GBS $g_k$, arrival time $a_k$, number of images $N_k$, importance weight $w_k$, and soft deadline $d_k$. Each task is compressed using one effective RQ-VAE depth selected from
 \begin{equation}
 \mathcal{D} = \{2, 4, 8, 16\}.
 \end{equation}
-\emph{In plain terms:} every image in a task is encoded at exactly one of
-four possible compression strengths, and that single choice is what
-trades off payload size against how useful the image ends up being once
-reconstructed.
+That's the whole choice a task makes: one of four compression strengths, trading payload size against how useful the reconstructed image ends up being.
 
-For each depth $q \in \mathcal{D}$, let $b_q$ denote the compressed
-payload size per image and $t_q^{\mathrm{enc}}$ the encoding delay. Rather
-than leaving downstream utility as an abstract placeholder $u_q$, this
-paper \emph{measures} it: $b_q = 88q$ bytes (measured on the FLAIR-1
-$8{\times}8$ dedicated models, \S\ref{sec:compression}), and quality is
-either the legacy pixel-fidelity proxy $u_q = 1 - \mathrm{LPIPS}_q$ or the
-measured downstream segmentation quality $s_q$ (both selectable via a
-configuration flag, see \S\ref{sec:downstream} for why the latter is used
-throughout the rest of this paper):
+For each depth $q \in \mathcal{D}$, let $b_q$ denote the compressed payload size per image and $t_q^{\mathrm{enc}}$ the encoding delay. Rather than leaving downstream utility as an abstract placeholder $u_q$, we measure it: $b_q = 88q$ bytes (measured on the FLAIR-1 $8{\times}8$ dedicated models), and quality is either the legacy pixel-fidelity proxy $u_q = 1 - \mathrm{LPIPS}_q$ or the measured downstream segmentation quality $s_q$, both selectable via a configuration flag (which one is preferable, and why, is a results-section question for later):
 \begin{equation}
 s_q = \frac{\mathrm{mIoU}_q - \mathrm{mIoU}_{\mathrm{floor}}}
            {\mathrm{mIoU}_{\mathrm{ref}} - \mathrm{mIoU}_{\mathrm{floor}}},
 \end{equation}
-where $\mathrm{mIoU}_{\mathrm{floor}}$ is the downstream segmentation
-model's score with the optical bands blanked out (near-infrared and
-elevation channels only). \emph{In plain terms:} this rescales raw mIoU so
-that $s_q = 0$ means "as useless as not delivering the image's optical
-content at all" (the decision-theoretic floor) rather than the
-mathematical floor $\mathrm{mIoU} = 0$, and $s_q = 1$ means "as useful as
-the uncompressed original" — so $s_q$ is directly interpretable as a
-fraction of the achievable task value recovered at depth $q$.
+where $\mathrm{mIoU}_{\mathrm{floor}}$ is the downstream segmentation model's score with the optical bands blanked out (near-infrared and elevation channels only) -- the decision-theoretic zero for not delivering an image's optical content, rather than the mathematical floor $\mathrm{mIoU} = 0$. So $s_q = 0$ means "as useless as not sending it," $s_q = 1$ means "as useful as the uncompressed original," and $s_q$ in between reads directly as a fraction of the achievable task value recovered at depth $q$.
 
-Let $x_{k,q} \in \{0,1\}$ indicate whether task $k$ is compressed using
-depth $q$. Each task selects exactly one compression depth:
+Let $x_{k,q} \in \{0,1\}$ indicate whether task $k$ is compressed using depth $q$. Each task selects exactly one compression depth:
 \begin{equation}
 \sum_{q \in \mathcal{D}} x_{k,q} = 1, \qquad \forall k \in \mathcal{K}.
 \end{equation}
@@ -77,36 +30,22 @@ Accordingly, the total compressed payload size of task $k$ is
 \begin{equation}
 B_k = N_k \sum_{q \in \mathcal{D}} b_q\, x_{k,q}.
 \end{equation}
-\emph{In plain terms:} these two equations just say "pick one depth per
-task" and "the task's total size is its image count times whichever
-per-image payload that depth costs" — they are the accounting that every
-later constraint and objective term builds on.
+Pick one depth per task, and the task's total size is its image count times whichever per-image payload that depth costs -- the accounting every later constraint and objective term builds on.
 
-Let $r_k(t)$ denote the number of images of task $k$ fully delivered to
-its destination GBS by the end of slot $t$. The delivery fraction of task
-$k$ is
+Let $r_k(t)$ denote the number of images of task $k$ fully delivered to its destination GBS by the end of slot $t$. The delivery fraction of task $k$ is
 \begin{equation}
 \rho_k(t) = \frac{r_k(t)}{N_k}, \qquad 0 \le \rho_k(t) \le 1.
 \end{equation}
-Let $y_{k,ij}(t) \ge 0$ denote the number of bits of task $k$ transmitted
-over link $(i,j)$ during slot $t$. The link-capacity constraint is
+Let $y_{k,ij}(t) \ge 0$ denote the number of bits of task $k$ transmitted over link $(i,j)$ during slot $t$. The link-capacity constraint is
 \begin{equation}
 \sum_{k \in \mathcal{K}} y_{k,ij}(t) \le C_{ij}(t)\, \Delta t,
-\qquad \forall (i,j) \in \mathcal{E}_t.
+\qquad \forall (i,j) \in \mathcal{E}_t,
 \end{equation}
-\emph{In plain terms:} no link can be asked to carry more traffic in one
-slot than its capacity allows — every task sharing a link must fit within
-that link's slot budget together.
+i.e.\ every task sharing a link has to fit inside that link's capacity for the slot, together.
 
-Let $Q_{i,k}(t)$ denote the remaining amount of task $k$'s data stored at
-node $i$ at slot $t$. The queue state evolves according to arriving
-compressed data and transmitted traffic, subject to standard flow
-conservation over the time-varying network: data can only leave a queue by
-being transmitted along a feasible link, and cannot exceed what has
-actually arrived at that node so far.
+Let $Q_{i,k}(t)$ denote the remaining amount of task $k$'s data stored at node $i$ at slot $t$. The queue state evolves according to arriving compressed data and transmitted traffic, subject to standard flow conservation over the time-varying network: data leaves a queue only by being transmitted along a feasible link, and can't exceed what has actually arrived at that node so far.
 
-To capture latency sensitivity, let $\phi_k(t) \in [0,1]$ denote the
-freshness weight of task $k$ at slot $t$:
+To capture latency sensitivity, let $\phi_k(t) \in [0,1]$ denote the freshness weight of task $k$ at slot $t$:
 \begin{equation}
 \phi_k(t) =
 \begin{cases}
@@ -114,130 +53,51 @@ freshness weight of task $k$ at slot $t$:
 \exp\!\big(-\alpha_k (t \Delta t - d_k)\big), & t \Delta t > d_k,
 \end{cases}
 \end{equation}
-where $\alpha_k$ controls how quickly value decays after the deadline
-($\alpha = 1/300\,\mathrm{s}^{-1}$ in this paper's experiments).
-\emph{In plain terms:} an image delivered before its soft deadline counts
-at full value; one delivered late is still worth something, but that
-value decays exponentially the later it arrives — a wildfire photo that
-shows up a day late is close to worthless, one that is five minutes late
-is nearly as good as on time. Tasks $|\mathcal{K}| = 64$ arrive from 8
-areas of interest with $N_k \sim \mathcal{U}\{100{,}000, 300{,}000\}$ and
-$w_k \sim \mathcal{U}\{1,2,3\}$ (seed 42); a task may be explicitly
-\texttt{dropped} (abandoned mid-flight) or \texttt{rejected} (refused at
-admission), both first-class reported outcomes rather than silent
-non-delivery.
+where $\alpha_k$ controls how quickly value decays after the deadline ($\alpha = 1/300\,\mathrm{s}^{-1}$ in our experiments). Delivered before the deadline, an image counts at full value; delivered late, it's still worth something but decays exponentially -- a wildfire photo a day late is close to worthless, one five minutes late is nearly as good as on time. Tasks $|\mathcal{K}| = 64$ arrive from 8 areas of interest with $N_k \sim \mathcal{U}\{100{,}000, 300{,}000\}$ and $w_k \sim \mathcal{U}\{1,2,3\}$ (seed 42); a task may be explicitly \texttt{dropped} (abandoned mid-flight) or \texttt{rejected} (refused at admission), both first-class reported outcomes rather than silent non-delivery.
 
 \subsection{Unified utility}
 \label{sec:unified-utility}
 
-Utility used to be defined in five places that disagreed: the reported
-score, the flat MPC's own objective, the two levels of the hierarchical
-scheduler, and the offline bound each used a different combination of
-terms. This paper instead uses one function for all five. With normalized
-weight $\bar w_k = w_k / \max_j w_j$ and realized arrival time
-$t^{\mathrm{arr}} = (t{+}1)\Delta t + \delta_{k,t}$ along the path actually
-used for delivery,
+Utility used to be defined in five places that disagreed: the reported score, the flat MPC's own objective, the two levels of the hierarchical scheduler, and the offline bound each used a different combination of terms. We use one function for all five. With normalized weight $\bar w_k = w_k / \max_j w_j$ and realized arrival time $t^{\mathrm{arr}} = (t{+}1)\Delta t + \delta_{k,t}$ along the path actually used for delivery,
 \begin{align}
 U_k &= \bar w_k \Big[\, \omega_Q\, s_{q_k}\, \hat G_k
        \;-\; \omega_T\, T_k \;-\; \omega_E\, C_k \,\Big], \\
 U &= \sum_k U_k \;+\; \omega_F\, |\mathcal{K}|\, \min_k \hat U_k,
 \end{align}
-with default weights $\omega_Q = 1.0$, $\omega_T = 0.25$,
-$\omega_E = 0.05$, $\omega_F = 0.1$. \emph{In plain terms:} each task earns
-a reward proportional to how much of it was delivered, scaled by how good
-the compression quality was ($s_{q_k}$) and how much of it actually got
-through ($\hat G_k$); that reward is then reduced by a lateness penalty
-($T_k$) and a resource-cost penalty ($C_k$); and the whole system's score
-adds up every task's net reward, plus a bonus tied to whichever single
-task did \emph{worst} (the fairness floor), so a scheduler cannot rack up
-a high score by quietly abandoning one inconvenient task. Here
-$\hat G_k \in [0,1]$ is a concave coverage gain over delivered,
-freshness-weighted image fraction (\S\ref{sec:coverage}); tardiness is
+with default weights $\omega_Q = 1.0$, $\omega_T = 0.25$, $\omega_E = 0.05$, $\omega_F = 0.1$. Each task earns reward proportional to how much of it got delivered, scaled by compression quality ($s_{q_k}$) and delivered fraction ($\hat G_k$), minus a lateness penalty ($T_k$) and a resource-cost penalty ($C_k$); the system-wide score sums every task's net reward and adds a bonus tied to whichever task did worst, so nothing can rack up a high score by quietly abandoning one inconvenient task. Here $\hat G_k \in [0,1]$ is a concave coverage gain over delivered, freshness-weighted image fraction (\S\ref{sec:coverage}); tardiness is
 \begin{equation}
 T_k = \sum_t \frac{\Delta r_{k,t}}{N_k}
   \min\!\Big(1,\, \frac{\max(0,\, t^{\mathrm{arr}} - d_k)}{\Delta_{\mathrm{ref}}}\Big),
 \end{equation}
-i.e.\ each newly-delivered slice of images contributes a penalty
-proportional to how late it arrived past the deadline, capped at 1 (a
-slice cannot be penalized as "more than maximally late"); resource cost is
+so each newly-delivered slice of images is penalized in proportion to how late it arrived past the deadline, capped at 1; resource cost is
 \begin{equation}
 C_k = \sum_t \frac{\Delta r_{k,t}}{N_k}
   \Big[\hat\omega_{\mathrm{tx}} \frac{b_q}{b_{\max}} + \hat\omega_{\mathrm{enc}}\Big],
 \end{equation}
-a normalized charge for the bandwidth and encode effort spent on each
-delivered slice; and
-$\hat U_k = U_k / (\omega_Q\, s_{\max}\, \bar w_k) \le 1$ is a scale-free,
-weight-relative normalization of $U_k$ used only inside the fairness term,
-so that a naturally "small" task (low weight) is not unfairly flagged as
-the worst-off one just because its raw $U_k$ is small.
+a normalized charge for bandwidth and encode effort spent on each delivered slice; and $\hat U_k = U_k / (\omega_Q\, s_{\max}\, \bar w_k) \le 1$ is a scale-free, weight-relative normalization of $U_k$ used only inside the fairness term, so a naturally small task (low weight) doesn't get unfairly flagged as the worst-off one just because its raw $U_k$ is small.
 
-\textbf{Legacy identity.} Setting $\omega_Q{=}1$,
-$\omega_T{=}\omega_E{=}\omega_F{=}0$, one coverage segment of unit
-width/slope, no weight normalization, and $s_q = 1 - \mathrm{LPIPS}_q$
-collapses this exactly to the original score
-$\sum_k \sum_t w_k \phi_k(t^{\mathrm{arr}}) u_{q_k} \Delta r_{k,t} / N_k$
-— the legacy scoring is a parameter setting of this same function, not a
-separate code path, and every previously-committed legacy number
-reproduces exactly under this setting.
+\textbf{Legacy identity.} Set $\omega_Q{=}1$, $\omega_T{=}\omega_E{=}\omega_F{=}0$, one coverage segment of unit width/slope, no weight normalization, and $s_q = 1 - \mathrm{LPIPS}_q$, and this collapses exactly to the original score $\sum_k \sum_t w_k \phi_k(t^{\mathrm{arr}}) u_{q_k} \Delta r_{k,t} / N_k$ -- legacy scoring is a parameter setting of this same function, not a separate code path, and every previously-committed legacy number reproduces exactly under this setting.
 
 \subsection{Concave coverage without integer variables}
 \label{sec:coverage}
 
-Getting the first fraction of a task's images delivered is worth more,
-per image, than getting the last fraction — a \emph{concave},
-diminishing-returns reward. Normally encoding a curved reward inside a
-linear program requires extra machinery (auxiliary binary or SOS2
-variables, which are expensive to solve). Instead, coverage gain is
-linearized over $J{=}4$ segments of width $\Delta_j$ and strictly
-decreasing slopes $m_1 > \cdots > m_J$ with $\sum_j \Delta_j m_j = 1$
-(default: widths $(0.25,0.25,0.25,0.25)$, slopes $(2.00, 1.12, 0.60,
-0.28)$, a discretization of $g(\rho) = (1-e^{-3\rho})/(1-e^{-3})$):
+Getting the first fraction of a task's images delivered is worth more, per image, than getting the last fraction -- a concave, diminishing-returns reward. Encoding a curved reward inside a linear program normally needs extra machinery (binary or SOS2 variables, expensive to solve). Instead, coverage gain is linearized over $J{=}4$ segments of width $\Delta_j$ and strictly decreasing slopes $m_1 > \cdots > m_J$ with $\sum_j \Delta_j m_j = 1$ (default: widths $(0.25,0.25,0.25,0.25)$, slopes $(2.00, 1.12, 0.60, 0.28)$, a discretization of $g(\rho) = (1-e^{-3\rho})/(1-e^{-3})$):
 \begin{align}
 \hat G_k &= \sum_{\tau, j} m_j\, \phi_k(t^{\mathrm{arr}}_\tau)\,
   \lambda_{k,q,\tau,j}, \\
 \sum_j \lambda_{k,q,\tau,j} &= \frac{y_{k,q,\tau}}{N_k}, \qquad
 \sum_{q,\tau} \lambda_{k,q,\tau,j} \le \Delta_j^{\mathrm{res}},
 \end{align}
-where $\Delta_j^{\mathrm{res}}$ is the width of segment $j$ still
-unclaimed by coverage already realized before the current planning
-horizon (omitting this residual would let the MPC re-earn steep
-early-segment credit at every re-plan, double-counting value already
-banked). \emph{In plain terms:} think of each task's 0--100\% delivered
-range as four stacked buckets, each paying less per percentage point than
-the one before it; $\lambda_{k,q,\tau,j}$ is how much of bucket $j$ a
-given slot's delivery fills. Because the payoff always shrinks bucket by
-bucket, a solver — even though it only understands straight lines — will
-always fill bucket 1 before touching bucket 2, and so on, entirely on its
-own: no binary "which bucket am I in" variable is ever needed, and the
-linear relaxation of this objective is exact.
+where $\Delta_j^{\mathrm{res}}$ is the width of segment $j$ still unclaimed by coverage already realized before the current planning horizon (skip this residual and the MPC would re-earn steep early-segment credit at every re-plan, double-counting value already banked). Picture each task's 0--100\% delivered range as four stacked buckets, each paying less per percentage point than the one before; $\lambda_{k,q,\tau,j}$ is how much of bucket $j$ a given slot's delivery fills. Because the payoff always shrinks bucket by bucket, a solver that only understands straight lines will still fill bucket 1 before touching bucket 2, entirely on its own -- no binary "which bucket am I in" variable needed, and the linear relaxation of this objective is exact.
 
 \subsection{Fairness: maximin, not Jain}
 
-Jain's index $(\sum_k U_k)^2 / (|\mathcal{K}| \sum_k U_k^2)$ is a classic
-networking fairness statistic, but it is a ratio of quadratics and cannot
-be represented inside a mixed-integer \emph{linear} program, so it is
-reported only as a diagnostic, never optimized directly. What is actually
-optimized is a \emph{maximin} floor — literally, how well the single
-worst-off task did — via one continuous column $u_{\min}$ and
-$|\mathcal{K}|$ constraint rows $u_{\min} \le \hat U_k$, entering the
-objective as $\omega_F |\mathcal{K}| u_{\min}$ (the second term of $U$
-above). $u_{\min}$ requires a free, unbounded-below lower bound, since
-$\hat U_k$ can go negative once tardiness/cost penalties exceed the
-quality gain for a badly-served task.
+Jain's index $(\sum_k U_k)^2 / (|\mathcal{K}| \sum_k U_k^2)$ is a classic networking fairness statistic, but it's a ratio of quadratics and can't be represented inside a mixed-integer linear program, so it's reported only as a diagnostic, never optimized directly. What's actually optimized is a maximin floor -- how well the single worst-off task did -- via one continuous column $u_{\min}$ and $|\mathcal{K}|$ constraint rows $u_{\min} \le \hat U_k$, entering the objective as $\omega_F |\mathcal{K}| u_{\min}$ (the second term of $U$ above). $u_{\min}$ needs a free, unbounded-below lower bound, since $\hat U_k$ can go negative once tardiness/cost penalties exceed the quality gain for a badly-served task.
 
 \subsection{Flat MPC objective}
 \label{sec:flat-mpc}
 
-At each decision slot $t$, the scheduler observes the current network
-state — task queues, remaining deadlines, satellite positions, available
-links — and predicts network evolution over a finite horizon of $H$
-slots: $\hat{\mathcal{E}}_{\tau|t}$, $\hat C_{ij}(\tau|t)$,
-$\hat Q_{i,k}(\tau|t)$ for $\tau = t, \ldots, t+H-1$. It jointly determines
-compression depth, transmission timing, and traffic allocation over that
-horizon, then executes only the first-slot decisions; at slot $t+1$ it
-observes the new state, shifts the horizon forward, and solves again. The
-rolling-horizon MILP solved by the flat \texttt{mpc} scheduler
-(re-solved every 5 slots or on new-task arrival; $H = 60$ slots) is
+At each decision slot $t$, the scheduler observes the current network state -- task queues, remaining deadlines, satellite positions, available links -- and predicts network evolution over a finite horizon of $H$ slots: $\hat{\mathcal{E}}_{\tau|t}$, $\hat C_{ij}(\tau|t)$, $\hat Q_{i,k}(\tau|t)$ for $\tau = t, \ldots, t+H-1$. It jointly determines compression depth, transmission timing, and traffic allocation over that horizon, then executes only the first-slot decisions; at slot $t+1$ it observes the new state, shifts the horizon forward, and solves again. The rolling-horizon MILP solved by the flat \texttt{mpc} scheduler (re-solved every 5 slots or on new-task arrival; $H = 60$ slots) is
 \begin{equation}
 \max \sum_{k,q,\tau} \Big[\, w_k\, \phi_k(t^{\mathrm{arr}}_{k,\tau})\, u_q
   \;+\; \lambda_1 (H-\tau)\, b_q \cdot 8 / 10^9
@@ -245,56 +105,22 @@ rolling-horizon MILP solved by the flat \texttt{mpc} scheduler
     \frac{\max(0,\, t^{\mathrm{arr}}_{k,\tau} - d_k)}{\Delta_{\mathrm{ref}}}
   \,\Big] \frac{y_{k,q,\tau}}{N_k},
 \end{equation}
-with $\lambda_{\mathrm{late}} = 5\times10^{-2}$,
-$\Delta_{\mathrm{ref}} = 300$\,s, subject to: one depth per task per slot,
-link/GBS capacity, the encoder throughput pipeline (81 images/s per
-satellite), and cumulative delivered-volume consistency. Here
-$t^{\mathrm{arr}}_{k,\tau} = (t+\tau+1)\Delta t + \text{route delay}$ uses
-the real propagation delay of the path actually assigned to $(k,\tau)$.
-\emph{In plain terms:} the objective rewards weighted, freshness-discounted
-useful delivery (first bracket term), gives a small forward-looking bonus
-to plans that keep transmitting rather than idling capacity (second
-term), and subtracts an explicit lateness penalty (third term) — letting
-the MPC \emph{rationally choose} to stop pushing a task's backlog once its
-cost outweighs its already-decayed value, rather than that decision
-happening implicitly through silent non-delivery. \S\ref{sec:hier}
-below makes this same tradeoff explicit via admission control and
-drop.
+with $\lambda_{\mathrm{late}} = 5\times10^{-2}$, $\Delta_{\mathrm{ref}} = 300$\,s, subject to: one depth per task per slot, link/GBS capacity, the encoder throughput pipeline (81 images/s per satellite), and cumulative delivered-volume consistency. Here $t^{\mathrm{arr}}_{k,\tau} = (t+\tau+1)\Delta t + \text{route delay}$ uses the real propagation delay of the path actually assigned to $(k,\tau)$. The first bracket term rewards weighted, freshness-discounted useful delivery; the second gives a small forward-looking bonus to plans that keep transmitting rather than idle capacity; the third subtracts an explicit lateness penalty -- which lets the MPC rationally choose to stop pushing a task's backlog once its cost outweighs its already-decayed value, instead of that decision happening implicitly through silent non-delivery. \S\ref{sec:hier} below makes this same tradeoff explicit via admission control and drop.
 
 \subsection{Congestion-aware predictive routing}
 \label{sec:congestion-routing}
 
-The default router picks the geometrically shortest path regardless of
-how busy it currently is, which can overload a popular link while a
-nearly-as-fast alternative sits idle. The congestion-aware variant
-(\texttt{mpc-congestion}) instead predicts each link's cost as propagation
-delay plus a queueing-theory-style congestion penalty computed against the
-MPC's own current plan:
+The default router picks the geometrically shortest path regardless of how busy it currently is, which can overload a popular link while a nearly-as-fast alternative sits idle. The congestion-aware variant (\texttt{mpc-congestion}) instead predicts each link's cost as propagation delay plus a queueing-theory-style congestion penalty computed against the MPC's own current plan:
 \begin{equation}
 w_e(\tau) = d_e(\tau) + \beta\, d_{\mathrm{ref}}\,
   \frac{\rho_e(\tau)}{1 - \min(\rho_e(\tau),\, \rho_{\max})}, \qquad
 \rho_e(\tau) = \frac{f_e(\tau)}{C_e \Delta t},
 \end{equation}
-where $f_e(\tau)$ is the bits the current plan places on edge $e$ at
-predicted step $\tau$, and $\rho_e(\tau)$ is that edge's predicted
-utilization. \emph{In plain terms:} a link's effective cost stays close to
-its physical delay while mostly empty, then rises sharply as it
-approaches saturation ($\rho_e \to \rho_{\max}$), which naturally spreads
-traffic across several good paths instead of jamming everyone onto the one
-"best on paper" route. Because the plan depends on routes and routes
-depend on the plan, this is iterated to a damped fixed point
-(method-of-successive-averages, $\eta_{\mathrm{it}} = 1/(\mathrm{it}+2)$,
-3 rounds, keep-best-iterate), with $\rho$ clipped at 0.99 so a saturated
-link is never treated as disconnected. This coupling is only measurable
-under the fabric-limited capacity regime (\S\ref{sec:setup}) — under the
-gbs-limited regime the ground-station aggregate budget dominates every
-route regardless of ISL cost, and congestion-aware routing is a provable,
-verified no-op there.
+where $f_e(\tau)$ is the bits the current plan places on edge $e$ at predicted step $\tau$, and $\rho_e(\tau)$ is that edge's predicted utilization. A link's effective cost stays close to its physical delay while mostly empty, then rises sharply as it approaches saturation ($\rho_e \to \rho_{\max}$), which spreads traffic across several good paths instead of jamming everyone onto the one "best on paper" route. Because the plan depends on routes and routes depend on the plan, this is iterated to a damped fixed point (method-of-successive-averages, $\eta_{\mathrm{it}} = 1/(\mathrm{it}+2)$, 3 rounds, keep-best-iterate), with $\rho$ clipped at 0.99 so a saturated link is never treated as disconnected. This coupling is only measurable under the fabric-limited capacity regime (\S\ref{sec:setup}) -- under the gbs-limited regime the ground-station aggregate budget dominates every route regardless of ISL cost, and congestion-aware routing is a provable, verified no-op there.
 
 \subsection{Two-MPC couplings: routing and depth}
 
-\textbf{\texttt{mpc-2level}}: a dedicated routing MPC solves a min-cost
-multicommodity-flow linear program over candidate paths,
+\textbf{\texttt{mpc-2level}}: a dedicated routing MPC solves a min-cost multicommodity-flow linear program over candidate paths,
 \begin{equation}
 \min \sum_{k,p,\tau} f_{k,p,\tau}
   \frac{\delta_{p,\tau}}{\Delta^{\mathrm{delay}}_{\mathrm{ref}}}
@@ -303,93 +129,19 @@ multicommodity-flow linear program over candidate paths,
 \sum_p f_{k,p,\tau} + \mathrm{sh}_{k,\tau} = D_{k,\tau}, \quad
 \sum_k \sum_{p \ni e} f_{k,p,\tau} \le C_e \Delta t,
 \end{equation}
-where $f_{k,p,\tau}$ is the flow assigned to task $k$ on candidate path
-$p$, $\mathrm{sh}_{k,\tau}$ is an explicit "shortfall" variable absorbing
-any demand no path can carry (penalized heavily by $M$ so it is only used
-when genuinely unavoidable), and $D_{k,\tau}$ is task $k$'s desired bit
-demand at step $\tau$. \emph{In plain terms:} this LP spreads each task's
-traffic across whichever candidate paths have room, at minimum total
-delay, rather than committing everything to one path — and if no
-combination of paths can carry all of it, the shortfall variable makes
-that gap explicit instead of the LP becoming infeasible. This routing LP
-and the depth MILP (\S\ref{sec:flat-mpc}) exchange demand $D_{k,\tau}$ and
-per-edge flow shares, iterated to a fixed point with the same
-successive-averages damping as \S\ref{sec:congestion-routing}. Critically,
-$D_{k,\tau}$ must be the task's \emph{desired} bits, not what the depth
-MILP already conceded — deriving it from the previous plan would be
-circular and silently reproduce flat MPC even under real congestion (a
-correctness trap caught during development). Iteration 0 is defined to be
-exactly flat \texttt{mpc}, so \texttt{mpc-2level} can never plan worse than
-flat MPC plans, by construction.
+where $f_{k,p,\tau}$ is the flow assigned to task $k$ on candidate path $p$, $\mathrm{sh}_{k,\tau}$ is an explicit "shortfall" variable absorbing any demand no path can carry (penalized heavily by $M$ so it's only used when genuinely unavoidable), and $D_{k,\tau}$ is task $k$'s desired bit demand at step $\tau$. This LP spreads each task's traffic across whichever candidate paths have room, at minimum total delay, instead of committing everything to one path -- and if no combination of paths can carry all of it, the shortfall variable makes that gap explicit rather than the LP going infeasible. This routing LP and the depth MILP (\S\ref{sec:flat-mpc}) exchange demand $D_{k,\tau}$ and per-edge flow shares, iterated to a fixed point with the same successive-averages damping as \S\ref{sec:congestion-routing}. Critically, $D_{k,\tau}$ has to be the task's \emph{desired} bits, not what the depth MILP already conceded -- deriving it from the previous plan would be circular and silently reproduce flat MPC even under real congestion (a correctness trap caught during development). Iteration 0 is defined to be exactly flat \texttt{mpc}, so \texttt{mpc-2level} can never plan worse than flat MPC plans, by construction.
 
-\textbf{\texttt{mpc-hier-route}}: a route-coordinator MPC runs once per
-10-minute macro-epoch over a 60-slot horizon in 10-slot macro-windows
-(topology evaluated at each window's middle slot, as a forecast), solving
-the same flow LP to \emph{freeze} the top-$K$ candidate paths per task for
-the whole epoch; the fast depth MILP then solves only within those frozen
-paths. Empty route assignments reproduce \texttt{mpc-hier}
-(\S\ref{sec:hier}) exactly, verified bit-for-bit.
+\textbf{\texttt{mpc-hier-route}}: a route-coordinator MPC runs once per 10-minute macro-epoch over a 60-slot horizon in 10-slot macro-windows (topology evaluated at each window's middle slot, as a forecast), solving the same flow LP to freeze the top-$K$ candidate paths per task for the whole epoch; the fast depth MILP then solves only within those frozen paths. Empty route assignments reproduce \texttt{mpc-hier} (\S\ref{sec:hier}) exactly, verified bit-for-bit.
 
-\textbf{Measured: route freezing does not survive a LEO fabric.} A route
-frozen at epoch start is usable at its own executed slot only $14.4\%$ of
-the time in general (this paper's fabric-limited scenario: $7.7\%$),
-falling to $0\%$ by a 570-second lookahead — because ground-station
-contact windows average only 227--265\,s, shorter than any planning epoch
-worth having. This is a structural property of the constellation geometry,
-not a tuning failure: it is specifically a negative result about freezing
-\emph{concrete paths}, not necessarily about freezing a more abstract
-routing decision (e.g.\ a serving-GBS assignment), which remains untested.
+\textbf{Measured: route freezing does not survive a LEO fabric.} A route frozen at epoch start is usable at its own executed slot only $14.4\%$ of the time in general (our fabric-limited scenario: $7.7\%$), falling to $0\%$ by a 570-second lookahead -- because ground-station contact windows average only 227--265\,s, shorter than any planning epoch worth having. That's a structural property of the constellation geometry, not a tuning failure: it's a negative result about freezing \emph{concrete paths} specifically, not necessarily about freezing a more abstract routing decision (e.g.\ a serving-GBS assignment), which remains untested.
 
 \subsection{Hierarchical MPC and the rotting-backlog fix}
 \label{sec:hier}
 
-\texttt{mpc-hier} pairs a slow upper-level coordinator (cadence 20 slots
-/ 10\,min, horizon 6 macro-steps $\approx$ 2\,h, an LP over
-\emph{continuous relaxed} depth $x_{k,q} \in [0,1]$ and GBS-aggregate
-budget only) with a fast lower-level per-task MILP (cadence 5 slots or on
-arrival, horizon 20 slots, \emph{integral} depth $x_{k,q}$, the same
-machinery as \S\ref{sec:flat-mpc}). \emph{In plain terms:} the upper level
-decides, at a coarse cadence, which tasks get admitted and roughly how
-much budget each gets; the lower level decides, at a fine cadence, the
-exact depth and schedule within that budget — trading a smaller,
-faster-solved problem for real admission/drop activity. Three mechanisms
-address a specific failure mode, \emph{stale-backlog starvation} (a task
-whose freshness has decayed to near zero but still generates optimization
-variables and is never served nor removed): admission control at arrival,
-explicit drop once freshness falls below a threshold or a task is
-sufficiently overdue (reported as \texttt{dropped}, not hidden), and a
-backpressure aging term in the lower-level objective that raises priority
-the longer a task has waited. These thresholds are first-pass tuned (five
-combinations tried), not an exhaustive search.
+\texttt{mpc-hier} pairs a slow upper-level coordinator (cadence 20 slots / 10\,min, horizon 6 macro-steps $\approx$ 2\,h, an LP over continuous relaxed depth $x_{k,q} \in [0,1]$ and GBS-aggregate budget only) with a fast lower-level per-task MILP (cadence 5 slots or on arrival, horizon 20 slots, integral depth $x_{k,q}$, the same machinery as \S\ref{sec:flat-mpc}). The upper level decides, at a coarse cadence, which tasks get admitted and roughly how much budget each gets; the lower level decides, at a fine cadence, the exact depth and schedule within that budget -- a smaller, faster-solved problem in exchange for real admission/drop activity. Three mechanisms address a specific failure mode, stale-backlog starvation (a task whose freshness has decayed to near zero but still generates optimization variables and is never served nor removed): admission control at arrival, explicit drop once freshness falls below a threshold or a task is sufficiently overdue (reported as \texttt{dropped}, not hidden), and a backpressure aging term in the lower-level objective that raises priority the longer a task has waited. These thresholds are first-pass tuned (five combinations tried), not an exhaustive search.
 
-\textbf{\texttt{mpc-hier} vs. the routing/depth split.} \texttt{mpc-hier}'s
-two levels both operate on \emph{depth} (a relaxed depth budget above, an
-integral depth choice below), with static routing at both levels — a
-different pairing from \texttt{mpc-2level}/\texttt{mpc-hier-route}, whose
-split is one MPC dedicated to \emph{routing} and one to \emph{depth}.
-\todoconfirm{Xuanhao's email asked to drop "the previous mpc-hier results
-where the two MPCs are both used for depth selection." That description
-textually matches \texttt{mpc-hier} as just defined, which makes it the
-likely candidate for what Xuanhao means — but all scheduler variants are
-still reported in \S\ref{sec:utility-results} pending his direct
-confirmation of scope.}
+\textbf{\texttt{mpc-hier} vs. the routing/depth split.} \texttt{mpc-hier}'s two levels both operate on depth (a relaxed depth budget above, an integral depth choice below), with static routing at both levels -- a different pairing from \texttt{mpc-2level}/\texttt{mpc-hier-route}, whose split is one MPC dedicated to routing and one to depth. \todoconfirm{Xuanhao's email asked to drop "the previous mpc-hier results where the two MPCs are both used for depth selection." That description textually matches \texttt{mpc-hier} as just defined, which makes it the likely candidate for what Xuanhao means -- but this is still pending his direct confirmation of scope.}
 
 \subsection{Offline optimality bound}
 
-To know whether a scheduler's score (e.g.\ 18.9) is actually good, it must
-be compared to the best \emph{possible} score under the same rules — an
-offline bound, computed here three ways of increasing tightness: (1) an
-analytic ceiling (every image at the best depth, delivered instantly — a
-sanity check only, not a meaningful bound); (2) a linear-programming bound
-(depth relaxed to continuous $x_{k,q} \in [0,1]$, time aggregated into
-5-slot windows, provably-non-binding link/GBS rows dropped, utility
-evaluated at each window's \emph{start} to remain a genuine upper bound —
-never optimistic about when delivery actually happens); and (3) a
-mixed-integer bound (the same relaxed constraints at full time resolution
-with integral depth, reporting the solver's dual bound even when the
-search has not fully converged within its time budget, which remains a
-valid upper bound regardless). The governing correctness rule is that
-every term in a scheduler's realized score must also appear in the
-bound's objective, relaxed only in the optimistic direction — enforced at
-runtime by an assertion that the bound is never smaller than any
-scheduler's realized score.
+To know whether a scheduler's score is actually good, it has to be compared to the best \emph{possible} score under the same rules -- an offline bound, computed three ways of increasing tightness: (1) an analytic ceiling (every image at the best depth, delivered instantly -- a sanity check only, not a meaningful bound); (2) a linear-programming bound (depth relaxed to continuous $x_{k,q} \in [0,1]$, time aggregated into 5-slot windows, provably-non-binding link/GBS rows dropped, utility evaluated at each window's \emph{start} to remain a genuine upper bound -- never optimistic about when delivery actually happens); and (3) a mixed-integer bound (the same relaxed constraints at full time resolution with integral depth, reporting the solver's dual bound even when the search hasn't fully converged within its time budget, which remains a valid upper bound regardless). The governing correctness rule: every term in a scheduler's realized score must also appear in the bound's objective, relaxed only in the optimistic direction -- enforced at runtime by an assertion that the bound is never smaller than any scheduler's realized score.

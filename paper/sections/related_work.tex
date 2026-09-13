@@ -1,64 +1,10 @@
 \section{Related Work}
 \label{sec:related-work}
 
-\todoconfirm{This section is drafted against general background rather
-than the two reference papers Xuanhao sent for how experimental results
-should be presented — those weren't available in the session that drafted
-this paper. Once shared, this section's structure/tone and citation set
-should be revised to match them; the citations below are limited to works
-this project directly builds on, to avoid citing anything not actually
-verified.}
+\todoconfirm{This section is drafted from general background, not the two reference papers Xuanhao sent for how results should be presented -- those weren't available when this draft was written. Once shared, revise this section's tone/structure to match, and expand citations. For now the only works cited are ones this project directly builds on, so nothing here is asserted without a check.}
 
-\paragraph{Orbital edge computing and LEO satellite networking.} Moving
-computation to the network edge is a well-established idea in terrestrial
-systems; OEC applies the same principle where the "edge" is the satellite
-itself, motivated by a downlink budget that is orders of magnitude smaller
-than the volume of imagery a modern sensor can capture in a single pass.
-LEO constellations add a networking wrinkle largely absent from
-terrestrial edge computing: topology and link capacity are not merely
-variable but \emph{predictable} — satellite and ground-station positions,
-and therefore contact windows and candidate routes, are known in advance
-from orbital mechanics. This paper's simulation environment is built on
-Hypatia~\cite{kassing2020hypatia}, an open-source LEO network simulator
-that models constellation geometry, inter-satellite links, and
-ground-station contact windows explicitly, which is what makes a
-rolling-horizon scheduler that \emph{predicts} short-term future
-connectivity (rather than only reacting to it) both possible and testable
-at scale.
+\paragraph{Orbital edge computing and LEO networking.} Moving computation to the network edge is old news in terrestrial systems; OEC is the same idea where the edge is the satellite, motivated by a downlink that's orders of magnitude smaller than what a modern sensor can capture in one pass. LEO adds something terrestrial edge computing mostly doesn't have: the topology isn't just variable, it's \emph{predictable} -- satellite and ground-station positions, and therefore contact windows and candidate routes, come straight out of orbital mechanics. The simulation environment here is built on Hypatia~\cite{kassing2020hypatia}, which models constellation geometry, ISLs, and ground-station contact windows explicitly. That's what makes a scheduler that predicts near-term connectivity, instead of just reacting to it, both possible and testable at this scale.
 
-\paragraph{Learned image compression for downlink-constrained systems.}
-On-board compression here uses a residual-quantized variational
-autoencoder (RQ-VAE)~\cite{lee2022autoregressive}: an encoder maps an
-image to a small set of codebook indices, and successive
-\emph{residual} quantization stages progressively refine the
-reconstruction, each stage correcting the error left by the stage before
-it. The number of stages run before transmission — this paper's
-\emph{depth} — is exactly the fidelity/payload knob a scheduler has to
-reason about. We evaluate this compression model on two remote-sensing
-benchmarks: EuroSAT~\cite{helber2019eurosat}, a 10-class land-cover
-classification dataset used for an initial spatial-size/depth sweep, and
-FLAIR-1~\cite{garioud2022flair}, a larger aerial-imagery semantic-segmentation
-dataset (15 land-cover classes) used for the paper's central downstream-task
-evaluation. Unlike most learned-compression evaluations, which report
-pixel-fidelity metrics (PSNR, SSIM, LPIPS, FID) as an end in themselves,
-this paper treats those metrics as necessary but insufficient: our results
-(\S\ref{sec:downstream}) show they can be nearly flat exactly where a
-downstream task's performance is not.
+\paragraph{Learned compression for downlink-constrained systems.} Compression here uses a residual-quantized VAE~\cite{lee2022autoregressive}: an encoder maps an image to codebook indices, and successive residual-quantization stages refine the reconstruction, each one correcting what the last stage got wrong. How many stages you run before transmitting -- depth, in this paper's terms -- is exactly the fidelity/payload knob a scheduler has to reason about. We evaluate it on two remote-sensing datasets: EuroSAT~\cite{helber2019eurosat} (10-class land-cover classification, used for an initial spatial-size/depth sweep) and FLAIR-1~\cite{garioud2022flair} (aerial imagery, 15-class semantic segmentation, the dataset behind this paper's central downstream-task result). Most learned-compression papers stop at pixel-fidelity metrics -- PSNR, SSIM, LPIPS, FID -- as the end goal. This paper treats them as necessary but not sufficient: \S\ref{sec:downstream} shows they can sit nearly flat exactly where a downstream task's performance doesn't.
 
-\paragraph{MPC-based scheduling and network optimization.} Model
-Predictive Control — solve an optimization over a finite look-ahead
-horizon, act on only the first step, then re-plan as new information
-arrives — is a natural fit for a system whose future state (contact
-windows, link capacities) is partially predictable but subject to real
-uncertainty (bursty task arrival, imperfect topology forecasts). We
-formulate the scheduling problem as a mixed-integer linear program so it
-remains tractable at the problem sizes this paper evaluates, and construct
-a piecewise-linear coverage reward specifically so that a concave,
-diminishing-returns objective can be optimized without introducing
-additional binary or SOS2 variables (\S\ref{sec:coverage}) — a standard
-technique for keeping a naturally nonlinear objective inside a linear
-program's reach. We evaluate this rolling-horizon approach against both
-simpler greedy baselines and a learned (reinforcement-learning) policy
-(\S\ref{sec:rl}), and against hierarchical and peer couplings that split
-routing and depth decisions into separate, communicating optimizers
-(\S\ref{sec:formulation}).
+\paragraph{MPC-based scheduling.} Model Predictive Control -- plan over a finite horizon, act on only the first step, replan as new information arrives -- fits a system whose future state is partly predictable (contact windows) but still genuinely uncertain (bursty arrivals, imperfect forecasts). We keep the scheduling problem a mixed-integer linear program so it stays solvable at the sizes this paper tests, and build a piecewise-linear coverage reward specifically so a concave objective can be optimized without adding binary or SOS2 variables (\S\ref{sec:coverage}) -- a standard trick for keeping a nonlinear objective inside an LP's reach. We compare this against simpler greedy baselines, a learned policy (\S\ref{sec:rl}), and hierarchical/peer couplings that split routing and depth into separate optimizers (\S\ref{sec:formulation}).

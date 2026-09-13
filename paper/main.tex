@@ -13,15 +13,13 @@
 \usepackage{subcaption}
 
 % Inline flags for results that are pending confirmation/rerun, so nothing
-% provisional silently reads as final -- carried over from the internal
-% experimental-report draft this paper is built from.
+% provisional silently reads as final.
 %   \pending{...}     -- data that needs a rerun before the number is final
 %   \todoconfirm{...} -- a scope question for Xuanhao/Dr. Liu, not yet answered
 \newcommand{\pending}[1]{\textcolor{orange!70!black}{[PENDING RERUN: #1]}}
 \newcommand{\todoconfirm}[1]{\textcolor{red!70!black}{[CONFIRM WITH XUANHAO: #1]}}
 
-\title{\textbf{Downlink-Constrained Task Scheduling for Orbital Edge Computing:\\
-Grounding Utility in Measured Downstream Task Performance}}
+\title{\textbf{Downlink-Constrained Task Scheduling for Orbital Edge Computing}}
 \author{Hemanth Sudhaharan \\ NICE Lab, North Carolina State University}
 \date{\today}
 
@@ -29,47 +27,34 @@ Grounding Utility in Measured Downstream Task Performance}}
 \maketitle
 
 \begin{abstract}
-Low-Earth-orbit (LEO) satellites capture far more imagery than their
-downlink budget can deliver in time to be useful, forcing an on-board
-choice of \emph{what} to send, \emph{how much} to compress it, and
-\emph{when}. This paper studies that choice for Orbital Edge Computing
-(OEC): a residual-quantized VAE (RQ-VAE) compresses each image at one of
-several selectable depths, and a rolling-horizon Model Predictive Control
-(MPC) scheduler decides depth, timing, and routing under time-varying
-satellite/ground-station connectivity. Our central finding is that the
-choice of \emph{quality signal} used to reward a scheduler determines
-whether MPC's benefit is even visible: under a pixel-fidelity proxy
-(LPIPS), MPC beats the best fixed-depth baseline by only $1.2\%$; once
-quality is grounded in the downstream task the imagery actually serves
-(measured semantic-segmentation mIoU), the same comparison shows a
-$32.2\%$ margin — roughly $26\times$ larger — because pixel fidelity is
-nearly flat across compression depths while task-relevant quality is not
-($+12\%$ vs.\ $+247\%$ across the same depth range). Building on this, we
-present a single unified utility function reconciling five previously
-disagreeing scoring definitions, evaluate ten schedulers (fixed-depth and
-adaptive greedy baselines, flat MPC, congestion-aware routing, and two
-hierarchical/two-level MPC couplings) against an offline optimality bound,
-and analyze the resulting depth-selection decisions and sensitivity to
-link-rate scarcity. We find that admission control — not routing
-sophistication — is what separates the strongest and weakest MPC variants,
-and that freezing a concrete route for longer than a few minutes does not
-survive a LEO constellation's short ground-contact windows. A reinforcement-learning
-(PPO) baseline is also evaluated: it trades a consistent 5--8\% utility
-gap for a 250--400$\times$ reduction in per-decision compute time.
+This document works through the on-board compression and downlink
+scheduling problem for Orbital Edge Computing (OEC): a residual-quantized
+VAE (RQ-VAE) compresses each image at one of several selectable depths,
+and a rolling-horizon MPC scheduler decides depth, timing, and routing
+under time-varying satellite/ground-station connectivity. It covers the
+system model and full scheduling formulation -- extending the original
+task model and MPC objective with a unified utility function, a
+congestion-aware routing variant, and hierarchical/two-level MPC couplings
+-- and the experimental setup (constellation, link-capacity regimes, task
+workload) those schedulers are evaluated against. Results, related work,
+and a conclusion are being written up separately as the corresponding
+experiments are finished.
 \end{abstract}
 
 \input{sections/introduction}
-\input{sections/related_work}
 \input{sections/formulation}
 \input{sections/setup}
-\input{sections/compression}
-\input{sections/utility_results}
-\input{sections/decisions}
-\input{sections/sweeps}
-\input{sections/rl_baseline}
-\input{sections/conclusion}
 
-\bibliographystyle{unsrt}
-\bibliography{reference}
+% Saved for later, not yet included in this draft (files exist in
+% sections/, ready to add back once results/related work are finished):
+%   \input{sections/related_work}
+%   \input{sections/compression}
+%   \input{sections/utility_results}
+%   \input{sections/decisions}
+%   \input{sections/sweeps}
+%   \input{sections/rl_baseline}
+%   \input{sections/conclusion}
+% \bibliographystyle{unsrt}
+% \bibliography{reference}
 
 \end{document}

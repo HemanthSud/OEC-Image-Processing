@@ -32,7 +32,7 @@ Areas of interest & 8 (California-fires, Amazon-basin, Sahel, Ganges-delta, \\
 Tasks per run $|K|$ & 64, one per (AOI, publication event), Poisson-triggered \\
 Images per task $N_k$ & $\sim \mathcal{U}(100{,}000,\ 300{,}000)$, total $\approx 12.81$M images \\
 Task weight $w_k$ & $\in \{1, 2, 3\}$ \\
-Random seed & 42 (task generation; sweeps in \S\ref{sec:sweeps} use 5 seeds) \\
+Random seed & 42 (task generation; sensitivity sweeps use 5 seeds) \\
 Simulation horizon & 18{,}000\,s (5\,h, $\approx 3.1$ orbits) \\
 Slot length $\Delta t$ & 30\,s $\Rightarrow$ 601 decision slots \\
 MPC planning horizon $H$ & 60 slots (30\,min look-ahead) \\
@@ -44,14 +44,13 @@ MPC planning horizon $H$ & 60 slots (30\,min look-ahead) \\
 
 Two named capacity regimes share the identical topology and task model but
 rebalance link rates to make different resources binding
-(Table~\ref{tab:regimes}). \textbf{gbs-limited} is the default and is used
-for the legacy-vs-unified utility comparison in \S\ref{sec:utility-results};
-its per-GBS aggregate budget is $\ge 12\times$ tighter than any ISL segment a
-route could cross, so ISL contention is mathematically unreachable there.
+(Table~\ref{tab:regimes}). \textbf{gbs-limited} is the default; its per-GBS
+aggregate budget is $\ge 12\times$ tighter than any ISL segment a route
+could cross, so ISL contention is mathematically unreachable there.
 \textbf{fabric-limited} throttles the ISL rate specifically so routing
-decisions have a measurable effect, and is used for the ten-scheduler
-comparison in \S\ref{sec:utility-results} and the decision-distribution
-analysis in \S\ref{sec:decisions}.
+decisions have a measurable effect. Both regimes are used across the
+scheduler-comparison and decision-distribution results this setup feeds,
+written up separately.
 
 \begin{table}[h]
 \centering
@@ -72,7 +71,7 @@ fabric-limited         & 1\,Mbps   & 50\,Mbps  & 500\,Mbps \\
 Each task-image is encoded on board at one of $D = \{2, 4, 8, 16\}$
 RQ-VAE residual-quantization depths before downlink. Payload scales linearly
 with depth, $b_q = 88q$ bytes (measured on the FLAIR-1 $8{\times}8$ dedicated
-models, \S\ref{sec:compression}): $b_2 = 176$\,B, $b_4 = 352$\,B,
+models): $b_2 = 176$\,B, $b_4 = 352$\,B,
 $b_8 = 704$\,B, $b_{16} = 1{,}408$\,B. On-board encode time is
 $12.34\,\text{ms}\,\pm\,0.03$--$0.05\,\text{ms}$ per image and is
 \emph{depth-independent} (measured identically at $8{\times}8{\times}1$ and
@@ -104,12 +103,11 @@ topology modules (\texttt{hypatia/satgenpy}), vendored unmodified.
 
 \subsection{Quality-table provenance}
 
-The utility function's quality term $s_q$ (\S\ref{sec:utility-results},
-\S\ref{sec:formulation}) is grounded in measured downstream FLAIR-1
-segmentation mIoU, source label \texttt{flair-unet-r34-rgbie / val7050 /
-2026-08-31} (full 7{,}050-image validation population; see
-\S\ref{sec:compression} for the measurement itself). All results in
-\S\ref{sec:utility-results} and \S\ref{sec:decisions} use this real,
-measured table (\texttt{hypatia\_sim/oec\_sim/quality\_table.json}), not the
-placeholder fallback (\texttt{config.QUALITY\_TABLE\_FALLBACK}) that the code
-falls back to when this file is absent.
+The utility function's quality term $s_q$ (\S\ref{sec:formulation}) is
+grounded in measured downstream FLAIR-1 segmentation mIoU, source label
+\texttt{flair-unet-r34-rgbie / val7050 / 2026-08-31} (full 7{,}050-image
+validation population; the measurement itself is written up separately).
+Every scheduler result this setup feeds uses this real, measured table
+(\texttt{hypatia\_sim/oec\_sim/quality\_table.json}), not the placeholder
+fallback (\texttt{config.QUALITY\_TABLE\_FALLBACK}) that the code falls
+back to when this file is absent.
