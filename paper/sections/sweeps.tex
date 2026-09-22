@@ -1,0 +1,50 @@
+\section{Sensitivity to Link Rate, Constellation, and Ground-Segment Size}
+\label{sec:sweeps}
+
+\subsection{GBS aggregate rate sweep: needs to be rerun}
+
+\texttt{oec\_sim/sweep.py} committed a grid of 6 GBS aggregate rates
+$\times$ 5 seeds $\times$ 6 schedulers (180 rows,
+\texttt{hypatia\_sim/oec\_scenario/sweep/results.csv}). \pending{This sweep
+was generated in the same commit that unified the utility function, but
+\emph{before} the real downstream mIoU quality table was wired in one
+commit later -- its own commit message states the quality table was ``not
+yet run on the server ... provisional until then'' at that point, and the
+file has not been regenerated since. Its utility values ($\approx$57--64)
+are on the placeholder-quality scale, not the real-quality scale
+($\approx$6--19) used everywhere else in this paper. \textbf{This sweep
+must be rerun against the current \texttt{quality\_table.json} before its
+exact numbers are reported as final} -- flagging this rather than
+transcribing stale numbers.} The qualitative shape of the earlier
+(placeholder-quality) run is: the best \emph{fixed} depth climbs
+$2\to4\to8\to16$ as the GBS rate rises, and \texttt{mpc} beat the best fixed
+depth in 5 of 6 rate regimes, tying only at the highest rate tested (no
+scarcity, "always max depth" already near-optimal) -- worth confirming
+still holds once rerun with real quality.
+
+\subsection{ISL rate sweep}
+
+A parallel 5-point ISL-rate sweep (0.5--2.0\,Mbps, 3 seeds,
+\texttt{results\_routing.csv}) isolates the routing MPC's own marginal
+contribution: at most $+0.84\%$ utility, and exactly $0\%$ above 1.5\,Mbps
+ISL (converges to flat MPC once there is nothing to route around). This
+sweep has the identical staleness issue as \S5.1 (placeholder quality
+table) and needs the same rerun before its exact numbers are final.
+
+\subsection{Proposed: satellite-count and GBS-count sweeps}
+
+Both axes are existing configuration knobs, not new code:
+\texttt{config.CONSTELLATIONS} already defines four named presets varying
+satellite count (\texttt{kuiper-630}: 1{,}156 sats; \texttt{starlink-550}:
+1{,}584 sats; \texttt{telesat-1015}: 351 sats; \texttt{small-walker}: 6
+sats, a topology-validation toy scenario not suited for a results sweep),
+and \texttt{config.GROUND\_STATIONS} is a plain list whose length sets
+$|\mathcal{G}|$. A satellite-count sweep can therefore run the existing
+harness (\texttt{sweep.py}) across the three real constellation presets (or
+intermediate synthetic $(\text{planes}, \text{sats/plane})$ tuples added to
+\texttt{CONSTELLATIONS}); a GBS-count sweep can add/remove entries from
+\texttt{GROUND\_STATIONS} (e.g.\ a 2-, 4-, 8-station subset of Hypatia's
+top-100 city list) and rerun. \pending{Neither sweep has been run yet --
+this is a proposed design, not a result. Both should use the current real
+quality table from the outset to avoid the staleness problem in
+\S5.1--5.2.}

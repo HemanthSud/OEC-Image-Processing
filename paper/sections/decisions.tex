@@ -1,0 +1,57 @@
+\section{Decision Distributions}
+\label{sec:decisions}
+
+This section reports the compression-depth chosen per task, per scheduler,
+from the same fabric-limited run (seed 42) as
+Tables~\ref{tab:scheduler-comparison}--\ref{tab:utility-components}, so
+utility, delivery, and decision-distribution results are directly
+comparable. Distributions were computed by aggregating the \texttt{depth}
+column of each \texttt{task\_outcomes\_*.csv} (64 tasks per scheduler);
+Table~\ref{tab:depth-dist} reports the count of tasks assigned each depth,
+plus tasks dropped or rejected before a depth was ever assigned.
+
+\begin{table}[h]
+\centering
+\caption{Depth-selection distribution per scheduler (of 64 tasks), fabric-limited scenario, seed 42.}
+\label{tab:depth-dist}
+\begin{tabular}{lrrrrr}
+\toprule
+Scheduler & $D{=}2$ & $D{=}4$ & $D{=}8$ & $D{=}16$ & Dropped/rejected \\
+\midrule
+greedy-fixed-2   & 64 & 0  & 0  & 0  & 0 \\
+greedy-fixed-4   & 0  & 64 & 0  & 0  & 0 \\
+greedy-fixed-8   & 0  & 0  & 64 & 0  & 0 \\
+greedy-fixed-16  & 0  & 0  & 0  & 64 & 0 \\
+greedy-adaptive  & 0  & 0  & 0  & 64 & 0 \\
+mpc              & 0  & 0  & 2  & 62 & 0 \\
+mpc-congestion   & 0  & 0  & 1  & 63 & 0 \\
+mpc-hier         & 1  & 11 & 35 & 17 & 39 \\
+mpc-hier-route   & 1  & 12 & 37 & 14 & 40 \\
+mpc-2level       & 0  & 0  & 0  & 64 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Fixed-depth greedy baselines behave exactly as specified} (sanity
+check: 64/64 tasks at the configured depth for every \texttt{greedy-fixed-*}
+row). \textbf{greedy-adaptive converges to depth 16 for every task in this
+run} — confirming numerically why its row is identical to
+\texttt{greedy-fixed-16} in Tables~\ref{tab:scheduler-comparison}--\ref{tab:utility-components}:
+under this scenario's contention level, the adaptive policy's queue-length
+trigger never fires away from the maximum depth. \textbf{The no-admission-control
+MPC family (mpc, mpc-congestion, mpc-2level) is overwhelmingly depth-16},
+using a lower depth only rarely (mpc: 2/64; mpc-congestion: 1/64) and never
+dropping a task. \textbf{The admission-control family (mpc-hier,
+mpc-hier-route) shows real depth diversity} across all four levels, but this
+comes with substantial admission/drop activity (39--40 of 64 tasks dropped
+or rejected before delivery) — the mechanism described in
+\S\ref{sec:hier} trading deliverability for smaller, faster-solved problems.
+This is the same finding stated at the utility level in
+\S\ref{sec:utility-results} (\S\ref{sec:formulation} \S\ref{sec:hier}):
+admission control, not depth or routing sophistication, is what
+distinguishes the two scheduler families.
+
+\pending{This table is reported for one scenario (fabric-limited) and one
+seed. Repeating it for the gbs-limited scenario, and for the satellite-/GBS-count
+sweep proposed in \S\ref{sec:sweeps}, would show whether the depth-diversity
+pattern in the admission-control family is scenario-specific or general.}

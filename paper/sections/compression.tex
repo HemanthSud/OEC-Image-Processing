@@ -1,0 +1,134 @@
+\section{Compression Model Results on FLAIR-1}
+\label{sec:compression}
+
+This section reports the on-board RQ-VAE compression model's reconstruction
+quality, the downstream segmentation task performance it induces (which
+grounds the utility function's quality term $s_q$), and on-board compute
+profiling.
+
+\subsection{Reconstruction quality: dedicated models}
+
+Table~\ref{tab:flair-dedicated} reports reconstruction quality for
+dedicated RQ-VAE models trained at each depth, evaluated on the full
+7{,}050-image FLAIR-1 validation split, fixed $8\times 8$ spatial latent grid.
+Depths 2, 3, and 4 have no dedicated trained model (training configs exist
+but were not run); \S\ref{sec:truncation} covers how those conditions are
+obtained instead.
+
+\begin{table}[h]
+\centering
+\caption{Dedicated FLAIR-1 RQ-VAE models, full validation split.}
+\label{tab:flair-dedicated}
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & Payload & PSNR (dB) & SSIM & LPIPS & FID & Compression \\
+\midrule
+$8{\times}8{\times}1$  & 88\,B    & 20.63 & 0.4560 & 0.4595 & 71.33  & 8{,}937:1 \\
+$8{\times}8{\times}8$  & 704\,B   & 21.02 & 0.4643 & 0.4779 & 73.19  & 1{,}117:1 \\
+$8{\times}8{\times}16$ & 1{,}408\,B & 21.06 & 0.4899 & 0.5039 & 125.78 & 559:1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{The truncation experiment: is reuse viable?}
+\label{sec:truncation}
+
+To avoid training a dedicated model per depth, we tested whether a single
+depth-16 model, decoded using only its first $N$ of 16 residual stages at
+inference (\texttt{forward\_partial\_code}), can substitute for a dedicated
+depth-$N$ model. Table~\ref{tab:truncation} reports this truncated-inference
+condition against the same depth-16 checkpoint.
+
+\begin{table}[h]
+\centering
+\caption{Truncated inference from one depth-16 checkpoint.}
+\label{tab:truncation}
+\begin{tabular}{lrrrr}
+\toprule
+Truncated to & PSNR (dB) & SSIM & LPIPS & FID \\
+\midrule
+1 stage   & 18.67 & 0.4793 & 0.5948 & 225.25 \\
+2 stages  & 19.72 & 0.4838 & 0.5570 & 197.76 \\
+4 stages  & 20.35 & 0.4831 & 0.5314 & 163.90 \\
+8 stages  & 20.73 & 0.4861 & 0.5171 & 143.19 \\
+16 stages & 21.06 & 0.4899 & 0.5039 & 125.78 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Result: reuse is not viable.} At depth 1, truncated inference is
+2\,dB worse in PSNR and over $3\times$ worse in FID than the dedicated
+depth-1 model (225.25 vs.\ 71.33). Even at depth 8, where the gap narrows,
+truncated inference remains measurably behind dedicated training (FID 143.19
+vs.\ 73.19). Consequently, the depth-2/4/8 downstream conditions reported in
+\S\ref{sec:downstream} use truncated inference from the depth-16 checkpoint
+and should be read as a \emph{lower bound} on what a dedicated model at that
+depth would achieve, not its true ceiling.
+
+\subsection{Downstream task performance}
+\label{sec:downstream}
+
+Pixel-fidelity metrics (PSNR, LPIPS) do not measure whether a reconstruction
+is still useful for the mission task. We evaluate each compression depth's
+reconstructions on FLAIR-1 semantic segmentation (15 land-cover classes)
+using IGNF's pretrained \texttt{FLAIR-INC\_rgbie\_15cl\_resnet34-unet} model,
+scored by mean IoU (mIoU) over the full 7{,}050-image validation population
+(Table~\ref{tab:downstream}).
+
+\begin{table}[h]
+\centering
+\caption{Downstream segmentation mIoU by compression depth. $s_q$ is
+floor-anchored: $s_q = (\text{mIoU}_q - \text{mIoU}_{\text{floor}}) /
+(\text{mIoU}_{\text{ref}} - \text{mIoU}_{\text{floor}})$.}
+\label{tab:downstream}
+\begin{tabular}{lrr}
+\toprule
+Condition & mIoU & $s_q$ (floor-anchored) \\
+\midrule
+blank (NIR + elevation only, floor) & 6.08\% & --- \\
+$q=1$ (truncated)  & 12.60\% & 0.104 \\
+$q=2$ (truncated)  & 17.53\% & 0.182 \\
+$q=4$ (truncated)  & 22.54\% & 0.262 \\
+$q=8$ (truncated)  & 25.68\% & 0.312 \\
+$q=16$ (dedicated) & 28.70\% & 0.360 \\
+uncompressed (ref) & 68.87\% & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This measured spread ($s_q$: $+247\%$ from $q=1$ to $q=16$) is far wider
+than the pixel-fidelity proxy it replaces ($1-\text{LPIPS}$: only $+12\%$
+over the same range), and is the reason the unified utility function's
+quality term is grounded in mIoU rather than pixel fidelity
+(\S\ref{sec:formulation}).
+
+Per-class results show this recovery is uneven: fine-texture classes
+(swimming pools, coniferous/deciduous forest) lose 70--99\% of their
+achievable IoU at $q=1$, while broad classes (agricultural land,
+greenhouses) lose only 28--35\%. Per-class detail is reported as
+supplementary analysis; the utility function uses overall mIoU by design.
+
+\todoconfirm{The uncompressed-reference mIoU (68.87\%) is higher than both
+the checkpoint's expected reproduction target ($\approx 54.43\%$) and its
+Hugging Face model-card self-reported value (58.6\%). A domain-leakage check
+between the validation population and the training domain came back clean,
+and per-class scores are structurally sane, but this has not been verified
+against FLAIR-1's true held-out test split. Treat 68.87\% as internally
+consistent for comparing depths against each other, not as a verified match
+to an external published number.}
+
+\subsection{On-board compute profiling}
+
+Encode time was measured on an NVIDIA A6000 at $8{\times}8{\times}1$ and
+$8{\times}8{\times}8$: $12.34\,\text{ms} \pm 0.03$--$0.05\,\text{ms}$ per
+image at both depths, i.e.\ encode time is depth-independent (dominated by
+the encoder CNN forward pass, not the residual-quantization loop). Per-image
+energy at 30\,W (Jetson AGX Orin mid-band assumption, since the A6000 used
+for timing is not a flight part): encode $= 0.370$\,J; downlink at $q=16$,
+$11{,}264$ bits at $2\times10^{-7}$ J/bit $= 2.25\times10^{-3}$\,J. Encode
+dominates downlink energy by $\sim 164\times$ per image ($\sim 230\times$
+over a run's full depth mix), and since it is depth-independent, a
+Joule-denominated cost term cannot drive depth choice — depth selection in
+this system is a \emph{bandwidth} decision, not an energy one
+(\S\ref{sec:formulation} discusses how the utility's cost term is scaled
+accordingly).

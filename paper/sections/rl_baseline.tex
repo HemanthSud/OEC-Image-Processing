@@ -1,0 +1,35 @@
+\section{A Learned Scheduling Policy: PPO vs. MPC}
+\label{sec:rl}
+
+Every scheduler in \S\ref{sec:utility-results} solves an optimization problem from scratch at every re-plan. Here we try the alternative: train a policy offline so at run time it only has to evaluate a small network instead of solving a fresh MILP.
+
+\todoconfirm{These results are on \textbf{legacy utility scale} (\S\ref{sec:formulation}), not unified -- the trained policy (\texttt{ppo\_oec.zip}) optimized the old single-factor reward and hasn't been retrained under \texttt{--utility unified}. Don't compare the numbers here against Tables~\ref{tab:scheduler-comparison}--\ref{tab:utility-components}; retraining under the unified reward is future work.}
+
+\subsection{Setup}
+
+The environment (\texttt{oec\_sim/rl\_env.py}) is a Gymnasium environment with a \texttt{Discrete(6)} action space -- commit one of 4 depths, defer, or drop a task -- decided per active task rather than per slot, so the action space doesn't scale with how many tasks are active or how large the constellation is. Reward matches the MILP objective plus a potential-based backlog-shaping term. We trained with PPO for 300k timesteps across load regimes 1.5--2.5\,Mbps and 10 seeds ($\sim$4 minutes on a CPU), then evaluated in-distribution and on a load regime the policy never saw during training.
+
+\subsection{Results}
+
+Table~\ref{tab:rl-vs-mpc} reports utility, delivery, and per-decision compute time for two seeds per regime.
+
+\begin{table}[h]
+\centering
+\caption{RL (PPO) vs. MPC, legacy utility scale, two seeds per regime.}
+\label{tab:rl-vs-mpc}
+\begin{tabular}{lrrrrr}
+\toprule
+Regime & RL utility & RL delivered\% & RL $\mu$s/decision & MPC utility & MPC $\mu$s/decision \\
+\midrule
+in-dist (2.0\,Mbps)   & 58.13 / 52.31 & 100\% & $\sim$500--1{,}400 & 61.58 / 55.55 & $\sim$145{,}000--243{,}000 \\
+OOD-light (4.0\,Mbps) & 58.13 / 52.31 & 100\% & $\sim$500--1{,}400 & 62.44 / 56.14 & $\sim$145{,}000--243{,}000 \\
+OOD-heavy (0.75\,Mbps)& 54.76 / 50.83 & 100\% & $\sim$500--700     & 58.92 / 53.27 & $\sim$163{,}000--173{,}000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+PPO loses to MPC on utility everywhere tested, by $5$--$8\%$ -- expected, since solving the problem fresh every time beats pattern-matching against training experience. It's also $\sim 250$--$400\times$ faster per decision (microseconds instead of hundreds of milliseconds), which is the actual reason a learned policy might be worth running on power- and compute-constrained flight hardware despite the utility gap.
+
+What we didn't expect: the policy's actions turn out to be provably rate-independent. Its observation includes task properties, active-task count, and mean freshness, but nothing about capacity or congestion, so its decisions are bit-for-bit identical between the 2.0\,Mbps and 4.0\,Mbps regimes at a fixed seed -- visible directly in the table above. It still delivers 100\% of images even at the most constrained regime tested (0.75\,Mbps, where \texttt{greedy-fixed-8} collapses to a fraction of its unconstrained utility), but that's because it happened to learn conservative depth choices, not because it senses congestion. Accidental robustness, not adaptive robustness. The obvious next step is adding a residual-bandwidth feature to the observation, which the original design called for but the shipped version dropped to keep the vector smaller.
+
+Two comparison-fairness bugs in the RL evaluation path were caught and fixed before these numbers were produced: the environment had been crediting RL deliveries with no propagation delay while every other scheduler charged the real route delay (measured effect: $0.0017\%$ utility, negligible against a 30-second slot and 300-second freshness constant -- a correctness fix, not a result change), and the RL scheduler's own utility accounting bypassed the shared \texttt{utility.run\_utility} path, which would have silently dropped the fairness term under \texttt{--utility unified}. Both now go through the same accounting as every other scheduler here.

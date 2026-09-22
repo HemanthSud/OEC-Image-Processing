@@ -1,0 +1,8 @@
+\section{Introduction}
+\label{sec:intro}
+
+A satellite in low Earth orbit sees far more of the ground than it can ever report. One pass over a wildfire or a flood can generate more raw pixels than the downlink can move to a ground station before the next decision has to be made, and a LEO satellite is only in radio contact with any given ground station for a few minutes before it drops below the horizon. Something has to decide which images matter, how hard to compress each one, and when to send it. That's what Orbital Edge Computing (OEC) is: pushing that decision onto the satellite itself instead of shipping raw data down and sorting it out later.
+
+This document works through that decision problem end to end. An on-board residual-quantized VAE (RQ-VAE) compresses each image at one of several depths (more refinement passes, bigger payload, better reconstruction), and a rolling-horizon MPC scheduler picks depth, timing, and route for every task competing for downlink capacity, under a topology and contact schedule that changes every slot.
+
+\S\ref{sec:formulation} builds directly on the original system model and MPC formulation, writing out the full scheduling problem -- the unified utility function, the concave coverage trick that keeps it a linear program, and every scheduler variant (flat MPC, congestion-aware routing, and the two ways of coupling a routing optimizer to the depth decision). \S\ref{sec:setup} specifies the constellation, link-capacity regimes, and task workload that later experiments will run against. Results, related work, and a conclusion are still in progress and follow once the corresponding experiments are finished and written up.

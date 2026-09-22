@@ -1,0 +1,60 @@
+\documentclass{article}
+\usepackage[top=1in, bottom=1in, left=1.3in, right=1.3in]{geometry}
+\usepackage{graphicx}
+\usepackage{tcolorbox}
+\tcbuselibrary{listings, breakable}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{float}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% Inline flags for results that are pending confirmation/rerun, so nothing
+% provisional silently reads as final.
+%   \pending{...}     -- data that needs a rerun before the number is final
+%   \todoconfirm{...} -- a scope question for Xuanhao/Dr. Liu, not yet answered
+\newcommand{\pending}[1]{\textcolor{orange!70!black}{[PENDING RERUN: #1]}}
+\newcommand{\todoconfirm}[1]{\textcolor{red!70!black}{[CONFIRM WITH XUANHAO: #1]}}
+
+\title{\textbf{Downlink-Constrained Task Scheduling for Orbital Edge Computing}}
+\author{Hemanth Sudhaharan \\ NICE Lab, North Carolina State University}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document works through the on-board compression and downlink
+scheduling problem for Orbital Edge Computing (OEC): a residual-quantized
+VAE (RQ-VAE) compresses each image at one of several selectable depths,
+and a rolling-horizon MPC scheduler decides depth, timing, and routing
+under time-varying satellite/ground-station connectivity. It covers the
+system model and full scheduling formulation -- extending the original
+task model and MPC objective with a unified utility function, a
+congestion-aware routing variant, and hierarchical/two-level MPC couplings
+-- and the experimental setup (constellation, link-capacity regimes, task
+workload) those schedulers are evaluated against. Results, related work,
+and a conclusion are being written up separately as the corresponding
+experiments are finished.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/formulation}
+\input{sections/setup}
+
+% Saved for later, not yet included in this draft (files exist in
+% sections/, ready to add back once results/related work are finished):
+%   \input{sections/related_work}
+%   \input{sections/compression}
+%   \input{sections/utility_results}
+%   \input{sections/decisions}
+%   \input{sections/sweeps}
+%   \input{sections/rl_baseline}
+%   \input{sections/conclusion}
+% \bibliographystyle{unsrt}
+% \bibliography{reference}
+
+\end{document}
