@@ -2,10 +2,6 @@
 
 Research project evaluating on-board satellite image compression using Residual Quantized Variational Autoencoders (RQ-VAE) under realistic LEO downlink constraints, with LEO network simulation via the Hypatia simulator.
 
-> **New to this project?** [Orbit School](https://claude.ai/code/artifact/3c074b01-1f64-4eae-bb60-e83be00b75dc)
-> is a from-zero primer covering every concept below (compression depth, MPC,
-> mIoU, routing, ...) tied back to this project's own numbers.
-
 | | |
 |---|---|
 | Lab | NICE Lab, North Carolina State University |
@@ -108,15 +104,6 @@ Window: 5 h (3.1 orbits) at 30 s slots. Run with `python3 -m oec_sim.run_all`
 (~25 s; add `--hier --oracle` for the hierarchical scheduler and HiGHS bound,
 ~1 min). `oec_sim/FORMULATION.md` states all parameters in the Overleaf
 notation.
-
-> **Condensed summary:** [Downstream-Grounded Utility](https://claude.ai/code/artifact/57268d58-3744-47c8-949b-6d011c022d86)
-> is a one-page readout of the headline result below — the margin between MPC
-> and a fixed depth choice, before and after grounding quality in a real
-> downstream task instead of pixel fidelity.
->
-> **Full synthesis:** [Signal & Depth](https://claude.ai/code/artifact/c044ebf4-4a26-4c6b-ba50-7daa08da6c32)
-> covers the complete 10-scheduler fabric-limited comparison, decision
-> distributions, and the route-freezing negative result, with every table.
 
 ### Unified Utility — one number that balances all the factors
 
@@ -275,8 +262,13 @@ fidelity.
 
 The pipeline that replaces `u_q = 1 − LPIPS_q` with real downstream
 performance lives in `rq-vae/downstream/`. It runs **server-side** (needs the
-RQ-VAE checkpoint, the FLAIR GeoTIFFs and CUDA) and has now completed a full
-run against the frozen 7,050-image val population.
+RQ-VAE checkpoint, the FLAIR GeoTIFFs and CUDA). First run (2026-08-31) used a
+7,050-image subset of the *validation* split, mislabeled below as the "full"
+population — it was always half of the true 14,125-image val population, a
+documentation bug independent of which split is correct. Re-run 2026-09-21
+against the official, complete 15,700-image **test** split (the split
+FLAIR-1's own published numbers are actually benchmarked against) — see the
+corrected results below.
 
 **Hybrid 5-band design.** RQ-VAE compresses RGB only, while FLAIR's baseline
 segmenter takes RGB + NIR + Elevation. Each output raster is therefore
@@ -319,41 +311,37 @@ stays low rather than needing all six conditions' reconstructions at once
 has hit 100% before). `metrics.py` is the bottleneck — a serial
 `confusion_matrix` over 262k pixels × 7,050 patches per condition.
 
-**Results, full 7,050-image val population:**
+**Results, full 15,700-image official test split (2026-09-21, current):**
 
 | condition | mIoU | s_q (floor-anchored) |
 |---|---|---|
-| orig (`mIoU_ref`) | 68.87% | — |
-| blank (`mIoU_floor`) | 6.08% | — |
-| q1 | 12.60% | 0.104 |
-| q2 | 17.53% | 0.182 |
-| q4 | 22.54% | 0.262 |
-| q8 | 25.68% | 0.312 |
-| q16 | 28.70% | 0.360 |
+| orig (`mIoU_ref`) | 52.12% | — |
+| blank (`mIoU_floor`) | 5.07% | — |
+| q1 | 11.76% | 0.142 |
+| q2 | 15.48% | 0.221 |
+| q4 | 19.32% | 0.303 |
+| q8 | 21.70% | 0.353 |
+| q16 | 23.85% | 0.399 |
 
-Floor-anchored spread from q1 to q16 is **~247%**, against **~12%** for the
-1−LPIPS proxy it replaces — pixel fidelity was massively understating how
-much reconstruction depth actually matters for a downstream task. That's the
-core validation of grounding the utility function this way.
+Floor-anchored spread from q1 to q16 is **~181%**, against **~12%** for the
+1−LPIPS proxy it replaces — pixel fidelity is still massively understating
+how much reconstruction depth actually matters for a downstream task; that
+core finding holds on the corrected data. (Superseded first-pass numbers, run
+2026-08-31 against a 7,050-image val subset — mislabeled "full" at the time,
+see above: orig 68.87%, blank 6.08%, q1/q2/q4/q8/q16 = 12.60/17.53/22.54/
+25.68/28.70%, spread ~247%. Kept here for the record, not for use.)
 
-One honest wrinkle: the checkpoint's own self-reported mIoU (58.6% for the
-15-class RGB+IR+Elevation ResNet34-UNet — see the model card at
-`IGNF/FLAIR-INC_rgbie_15cl_resnet34-unet` on HuggingFace) doesn't match
-`mIoU_ref` here. Root cause, best understanding: FLAIR-1-main ships two
-different held-out sets — the *val* split used here (a held-out-domain slice
-of the *train* data release) and a separate official *test* split (a
-different data release entirely). IGNF's published number was almost
-certainly benchmarked against the test split, not val; a domain-leakage check
-between our val population and the training domains came back clean, ruling
-out the more concerning explanation. Per-class IoU on our val population is
-structurally sane throughout (easy common classes like building/water score
-high, rare/small classes like swimming_pool score lower) — the signature of
-a correctly-loaded, working model, just evaluated against an easier
-population than IGNF's headline number. Verifying against the true test split
-would need unzipping a 14 GB test-image archive plus an unfetched test-label
-archive and predicting on 15,700 images — judged not worth it, since what the
-OEC utility needs is a self-consistent `mIoU_q` on one fixed population
-across depths, not an exact match to an external benchmark number.
+The earlier open question — the checkpoint's self-reported mIoU (58.6%,
+`IGNF/FLAIR-INC_rgbie_15cl_resnet34-unet` model card on HuggingFace) not
+matching `mIoU_ref` — is resolved: the first-pass 68.87% was measured against
+the *val* split, not the *test* split IGNF's own number is benchmarked
+against. Re-measured against the true test split (52.12%), which lands close
+to IGNF's own separately-published baseline for this checkpoint class
+(0.5443, `FLAIR-1-main/README.md`) — confirming the val-split run was simply
+too easy a population, not a loading or config bug. Verified directly this
+time: the test CSV used matches the official 15,700-row file exactly
+(0 diff), band order/normalization/class-weights all confirmed unchanged from
+the shipped `flair-1-config.yaml`.
 
 **The segmentation tool computes more than mIoU alone**, and the rest was
 captured but not previously surfaced — it's in
