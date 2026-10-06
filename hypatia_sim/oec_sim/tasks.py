@@ -70,11 +70,23 @@ def generate_tasks(topo):
             if len(over) == 0:
                 continue
             src = int(over[np.argmax(topo.aoi_elev[t, over, a])])
+            if C.TASK_SIZE_MODE == 'data_gb':
+                # Task defined directly by its data size (Xuanhao's ask),
+                # inverted to n_images via the FLAIR-measured PAYLOAD_B
+                # table at TASK_SIZE_REF_DEPTH -- see config.py for the full
+                # rationale. Same single rng call per task as the 'images'
+                # path below, so RNG call order/count is unaffected.
+                data_bytes = rng.uniform(C.TASK_DATA_GB_MIN,
+                                         C.TASK_DATA_GB_MAX) * 1e9
+                n_images_k = max(1, int(round(
+                    data_bytes / C.PAYLOAD_B[C.TASK_SIZE_REF_DEPTH])))
+            else:
+                n_images_k = int(rng.integers(C.TASK_IMAGES_MIN,
+                                              C.TASK_IMAGES_MAX + 1))
             tasks.append(Task(
                 kid=len(tasks), aoi=aoi['name'], src_sat=src,
                 dst_gs=_nearest_gs(aoi), arrival_slot=t,
-                n_images=int(rng.integers(C.TASK_IMAGES_MIN,
-                                          C.TASK_IMAGES_MAX + 1)),
+                n_images=n_images_k,
                 weight=int(rng.choice(C.TASK_WEIGHTS)),
                 deadline_s=int(t * C.SLOT_S
                                + rng.integers(C.TASK_DEADLINE_MIN_S,
