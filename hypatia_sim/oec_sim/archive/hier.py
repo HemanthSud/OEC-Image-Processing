@@ -1,4 +1,12 @@
 """
+ARCHIVED 2026-09-21 (Xuanhao's ask): mpc-hier / mpc-hier-route are no longer
+part of the OrbitFlow paper's scheduler comparison -- superseded by
+OrbitFlow (predictive congestion-aware Dijkstra routing, schedulers.py) and
+Two-Level-MPC (multicommodity-flow routing optimizer, twolevel.py). Nothing
+in the active codebase imports this module anymore (run_all.py/sweep.py's
+--hier/--hier-route wiring was removed in the same pass). Kept here,
+unimported, for provenance -- not deleted.
+
 Hierarchical MPC (Dr. Liu: "hierarchical MPC ... use one MPC to select the
 best path and use another one [for depth]") plus the rotting-backlog fix
 (a task whose freshness has decayed to ~0 still holds backlog and still

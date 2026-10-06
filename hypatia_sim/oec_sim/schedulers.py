@@ -207,14 +207,14 @@ class MPCScheduler(_Base):
                                MPC_ROUTE_ITERS rounds).
     """
 
-    name = 'mpc'
+    name = 'Flat-MPC'
 
     def __init__(self, topo, tasks, horizon=None, route_mode='static'):
         super().__init__(topo, tasks)
         self.H = horizon or C.MPC_HORIZON_SLOTS
         self.route_mode = route_mode
         if route_mode == 'predictive':
-            self.name = 'mpc-congestion'
+            self.name = 'OrbitFlow'
             self.predictor = R.PredictiveRouter(topo, self.isl_index)
         self.plan = {}           # (kid, q, abs_slot) -> images
         self.plan_paths = {}     # (kid, abs_slot) -> keys, for _execute
@@ -395,8 +395,14 @@ class MPCScheduler(_Base):
         # uses freshness at the *arrival* time, i.e. slot-end plus this
         # route's propagation delay (Xuanhao's ask: a real delay-related
         # term, not just the freshness discount alone).
-        # `early` and the x[k,q] cost below stay objective-only regularizers:
-        # they were never part of the score, and legacy must preserve that.
+        #
+        # Two planning-only regularizers (an early-transmission bonus over y,
+        # and a depth-commitment cost over x[k,q], both driven by the single
+        # coefficient MPC_LAMBDA_QUEUE) were ablated 2026-09-21 per Xuanhao's
+        # Eq. 22 request: 5 seeds x 3 schedulers, baseline vs. zeroed --
+        # utility delta <=0.1% and no solver-time change for every scheduler.
+        # Negligible by his own stated criterion, so removed here rather than
+        # kept for a non-effect.
         c = np.zeros(n)
         val = np.zeros(n)      # pure reported-score coefficients, no regularizers
         for (kid, q, tau), i in yi.items():
@@ -405,10 +411,8 @@ class MPCScheduler(_Base):
             t_arrive = (t + tau + 1) * C.SLOT_S + delay_s
             util = utility.y_coeff(k, q, t_arrive)
             val[i] = util
-            early = (C.MPC_LAMBDA_QUEUE * (H - tau)
-                     * C.PAYLOAD_B[q] * 8 / 1e9)          # backlog term, Gbit
             tardy = utility.objective_tardiness_coeff(k, t_arrive)
-            c[i] = -(util + early - tardy)
+            c[i] = -(util - tardy)
         seg.set_objective(
             c, task_by_id,
             lambda g: ((t + g[2] * C.UTIL_SEG_STRIDE + 1) * C.SLOT_S
@@ -416,10 +420,6 @@ class MPCScheduler(_Base):
             val=val)
         if umin_i is not None:
             c[umin_i] = -(C.UTIL_W_FAIR * max(len(self.tasks), 1))
-        for (kid, q), i in xi.items():
-            k = task_by_id[kid]
-            rem = k.n_images - k.delivered
-            c[i] = C.MPC_LAMBDA_QUEUE * H * rem * C.PAYLOAD_B[q] * 8 / 1e9
 
         rows, cols, vals, lbs, ubs = [], [], [], [], []
         r = 0

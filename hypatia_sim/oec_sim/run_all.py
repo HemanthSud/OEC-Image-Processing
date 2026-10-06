@@ -30,7 +30,7 @@ def _write_csv(path, rows, fields):
 def run_schedulers(topo, extra_makers=()):
     """Run every scheduler on a fresh copy of the task set. extra_makers
     is a list of (topo, tasks) -> scheduler callables appended to the
-    default set (e.g. mpc-congestion, mpc-hier — see run_all.main())."""
+    default set (e.g. OrbitFlow, Two-Level-MPC — see run_all.main())."""
     results = {}
     makers = ([lambda tp, tk: MPCScheduler(tp, tk),
                lambda tp, tk: GreedyScheduler(tp, tk, depth=None)]
@@ -182,8 +182,13 @@ def build_summary(topo, results):
     offered16 = tot_img * C.PAYLOAD_B[q_max] * 8
     cap = C.N_GS * C.GS_RATE_BPS * C.SIM_S
     L.append('── Task load K ──────────────────────────────────────────────')
-    L.append(f'  {len(any_tasks)} tasks, {tot_img:,} images total, '
-             f'N_k ~ U({C.TASK_IMAGES_MIN:,}, {C.TASK_IMAGES_MAX:,})')
+    if C.TASK_SIZE_MODE == 'data_gb':
+        L.append(f'  {len(any_tasks)} tasks, {tot_img:,} images total, '
+                 f'size ~ U({C.TASK_DATA_GB_MIN}, {C.TASK_DATA_GB_MAX}) GB '
+                 f'(inverted to n_images at depth {C.TASK_SIZE_REF_DEPTH})')
+    else:
+        L.append(f'  {len(any_tasks)} tasks, {tot_img:,} images total, '
+                 f'N_k ~ U({C.TASK_IMAGES_MIN:,}, {C.TASK_IMAGES_MAX:,})')
     L.append(f'  offered load at depth-{q_max}: {offered16 / 1e9:.1f} Gbit  vs  '
              f'total GBS capacity {cap / 1e9:.1f} Gbit  '
              f'(utilization {offered16 / cap:.2f})')
@@ -336,8 +341,8 @@ def check_golden(snap, path=None, tol=1e-4):
     for name, g in gold.get('schedulers', {}).items():
         got = snap['schedulers'].get(name)
         if got is None:
-            # not run (e.g. mpc-hier without --hier). Not drift -- say so
-            # rather than failing, so a bare --check-golden stays usable.
+            # not run (e.g. Two-Level-MPC without --twolevel). Not drift --
+            # say so rather than failing, so a bare --check-golden stays usable.
             skipped.append(name)
             continue
         for field in ('utility', 'images'):
@@ -366,18 +371,11 @@ def main(argv=None):
     p.add_argument('--scenario', default=C.SCENARIO,
                    choices=list(C._SCENARIOS))
     p.add_argument('--congestion', action='store_true',
-                   help='also run mpc-congestion (predictive routing, '
-                        'Dr. Liu\'s directive) alongside the flat mpc')
-    p.add_argument('--hier', action='store_true',
-                   help='also run mpc-hier (hierarchical MPC)')
+                   help='also run OrbitFlow (MPC-predicted congestion costs '
+                        'feeding per-step Dijkstra routing) alongside Flat-MPC')
     p.add_argument('--twolevel', action='store_true',
-                   help='also run mpc-2level (routing MPC and depth MPC as '
-                        'iterated peers)')
-    p.add_argument('--hier-route', action='store_true',
-                   help='also run mpc-hier-route (slow routing MPC freezing '
-                        'a path set for a fast depth MPC)')
-    p.add_argument('--couplings', action='store_true',
-                   help='shorthand for --twolevel --hier-route --hier')
+                   help='also run Two-Level-MPC (routing MPC and depth MPC '
+                        'iterated as peers)')
     p.add_argument('--oracle', action='store_true',
                    help='compute the HiGHS offline upper bound and append '
                         'the optimality-gap table to summary.txt')
@@ -413,17 +411,9 @@ def main(argv=None):
     extra_makers = []
     if args.congestion:
         extra_makers.append(lambda tp, tk: MPCScheduler(tp, tk, route_mode='predictive'))
-    if args.couplings:
-        args.hier = args.twolevel = args.hier_route = True
-    if args.hier:
-        from .hier import HierarchicalMPCScheduler
-        extra_makers.append(lambda tp, tk: HierarchicalMPCScheduler(tp, tk))
     if args.twolevel:
         from .twolevel import TwoLevelMPCScheduler
         extra_makers.append(lambda tp, tk: TwoLevelMPCScheduler(tp, tk))
-    if args.hier_route:
-        from .hier import HierRouteMPCScheduler
-        extra_makers.append(lambda tp, tk: HierRouteMPCScheduler(tp, tk))
 
     print('Running schedulers...')
     results = run_schedulers(topo, extra_makers=extra_makers)

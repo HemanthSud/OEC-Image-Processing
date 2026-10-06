@@ -16,9 +16,8 @@ from . import utility
 
 # fixed categorical assignment (entity -> hue, never cycled)
 SCHED_COLOR = {
-    'mpc':             '#2a78d6',
-    'mpc-congestion':  '#0b3d91',
-    'mpc-hier':        '#8a4fbf',
+    'Flat-MPC':        '#2a78d6',
+    'OrbitFlow':       '#0b3d91',
     'mpc-oracle':      '#1a1a19',
     'ppo':             '#c77b1a',
     'greedy-adaptive': '#1baf7a',
@@ -27,8 +26,7 @@ SCHED_COLOR = {
     'greedy-fixed-4':  '#4a3aa7',
     'greedy-fixed-8':  '#e34948',
     'greedy-fixed-16': '#e87ba4',
-    'mpc-2level':      '#00857a',
-    'mpc-hier-route':  '#b5590f',
+    'Two-Level-MPC':   '#00857a',
 }
 GRID = dict(color='#e6e6e2', linewidth=0.8)
 plt.rcParams.update({
@@ -151,7 +149,7 @@ def make_all(topo, results):
     for name, res in results.items():
         h, col = res['hist'], SCHED_COLOR.get(name, '#6f6e66')
         tt = np.array(h['t_s']) / 60
-        lw = 2.4 if name == 'mpc' else 1.6
+        lw = 2.4 if name == 'OrbitFlow' else 1.6
         axes[0, 0].plot(tt, np.array(h['delivered_images']) / 1e6,
                         color=col, lw=lw, label=name)
         axes[0, 1].plot(tt, h['utility'], color=col, lw=lw, label=name)
@@ -199,7 +197,7 @@ def make_all(topo, results):
         if not delays:
             continue
         yy = np.arange(1, len(delays) + 1) / len(res['tasks'])
-        lw = 2.4 if name == 'mpc' else 1.6
+        lw = 2.4 if name == 'OrbitFlow' else 1.6
         ax.step(np.array(delays) / 60, yy, where='post', color=col, lw=lw,
                label=name)
     ax.set_xlabel('completion delay (min)')
@@ -247,8 +245,7 @@ def make_all(topo, results):
         n_fig += 1
 
     # 8 — the coupling comparison: utility against what it costs to solve
-    cpl = [n for n in results if n in ('mpc', 'mpc-2level', 'mpc-hier',
-                                       'mpc-hier-route', 'mpc-congestion')]
+    cpl = [n for n in results if n in ('Flat-MPC', 'Two-Level-MPC', 'OrbitFlow')]
     if len(cpl) >= 2:
         fig, ax = plt.subplots(figsize=(7.0, 4.4))
         pts = []

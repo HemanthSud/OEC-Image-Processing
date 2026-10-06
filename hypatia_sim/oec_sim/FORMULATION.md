@@ -93,30 +93,32 @@ Both are written to `quality_table.json` so the choice stays visible and
 reversible. **If the spread is still narrow after floor anchoring, that is the
 finding** -- report it rather than tuning it away.
 
-The server sweep has landed: `oec_sim/quality_table.json` holds real
-mIoU on the full 7,050-image val population (`flair-unet-r34-rgbie`,
+**Corrected 2026-09-21**: `oec_sim/quality_table.json` now holds real mIoU on
+the full, official 15,700-image FLAIR-1 **test** split (`flair-unet-r34-rgbie`,
 `FLAIR-INC_rgbie_15cl_resnet34-unet`, floor-anchored). Measured
-$s_q$ = 0.104 / 0.182 / 0.262 / 0.312 / 0.360 at q = 1/2/4/8/16 --
-a ~247% spread from q1 to q16, against ~12% for the 1-LPIPS proxy it
-replaces. $\text{mIoU}_{\text{ref}}$ = 68.87%, $\text{mIoU}_{\text{floor}}$
-= 6.08%. `config.QUALITY_TABLE_FALLBACK` remains as a PROVISIONAL fallback
-only for environments without the real file (e.g. a laptop with no server
-access); every run that falls back to it still prints
-`PROVISIONAL - NOT MEASURED` in `summary.txt` so the two are never confused.
+$s_q$ = 0.142 / 0.221 / 0.303 / 0.353 / 0.399 at q = 1/2/4/8/16 --
+a ~181% spread from q1 to q16, against ~12% for the 1-LPIPS proxy it
+replaces -- the central finding holds on the corrected data.
+$\text{mIoU}_{\text{ref}}$ = 52.12%, $\text{mIoU}_{\text{floor}}$ = 5.07%.
+`config.QUALITY_TABLE_FALLBACK` remains as a PROVISIONAL fallback only for
+environments without the real file (e.g. a laptop with no server access);
+every run that falls back to it still prints `PROVISIONAL - NOT MEASURED` in
+`summary.txt` so the two are never confused.
 
-One caveat worth recording: $\text{mIoU}_{\text{ref}}$ (68.87%) does not match
-the checkpoint's own self-reported mIoU (58.6%, its HuggingFace model card).
-Best-understood cause: FLAIR-1-main ships a held-out-domain *val* split (used
-here) and a separately-released official *test* split, and IGNF's published
-number was almost certainly benchmarked on the latter. Domain leakage between
-our val population and the training domains was checked and ruled out;
-per-class IoU is structurally sane (common classes score high, rare ones
-lower) -- the signature of correctly-loaded weights evaluated against an
-easier population, not a broken pipeline. Verifying against the true test
-split needs a 14 GB test-image archive plus an unfetched test-label archive
-and predict+metrics on 15,700 images -- judged not worth it, since the OEC
-utility only needs a self-consistent $\text{mIoU}_q$ on one fixed population
-across depths, not a match to an external benchmark.
+**Superseded first-pass run (2026-08-31)**, kept for the record: measured on
+a 7,050-image *val*-split subset, mislabeled "full 7,050-image val
+population" at the time -- it was always half of the true 14,125-image val
+population. Gave $\text{mIoU}_{\text{ref}}$ = 68.87%, $s_q$ =
+0.104/0.182/0.262/0.312/0.360, ~247% spread. That $\text{mIoU}_{\text{ref}}$
+didn't match the checkpoint's self-reported mIoU (58.6%, its HuggingFace
+model card) -- now resolved: 68.87% was benchmarked on val, not the official
+test split IGNF's own number uses. Re-measured against the true test split
+(52.12%) lands close to IGNF's own separately-published baseline for this
+checkpoint class (0.5443, `FLAIR-1-main/README.md`), confirming the val run
+was simply an easier population, not a broken pipeline. Verified directly:
+the test CSV used matches the official 15,700-row file exactly (0 diff), band
+order/normalization/class-weights unchanged from the shipped
+`flair-1-config.yaml`.
 
 ## Unified utility (the reported score AND the objective)
 
@@ -304,8 +306,10 @@ gives a 3-10x MILP speedup, which is also what makes the offline oracle
 
 Dr. Liu: *"MPC predicts link costs, Dijkstra computes the path at each
 predicted step; MPC and Dijkstra are not necessarily mutually exclusive."*
-Implemented in `oec_sim/routing.py`, `route_mode='predictive'`
-(scheduler name `mpc-congestion`):
+This is what Xuanhao's OrbitFlow paper names **OrbitFlow** (2026-09-21) --
+the project's own namesake scheduler. Implemented in `oec_sim/routing.py`,
+`route_mode='predictive'` (scheduler name `OrbitFlow`, code-internal
+`mpc-congestion` before the 2026-09-21 rename):
 
 $$w_e(\tau) = d_e(\tau) + \beta\,d_{\text{ref}}\,
              \frac{\rho_e(\tau)}{1-\min(\rho_e(\tau),\,\rho_{\max})},\qquad
@@ -328,7 +332,7 @@ work, not built.
 
 **Only measurable under `SCENARIO='fabric-limited'`** -- see the capacity
 table above; under `gbs-limited` the GBS aggregate budget dominates every
-route regardless of ISL cost, so `mpc-congestion` is a provable no-op there
+route regardless of ISL cost, so `OrbitFlow` is a provable no-op there
 (verified: iteration-0 output is bit-identical to `route_mode='static'`).
 
 ## Two-MPC split: routing MPC + depth MPC
@@ -336,7 +340,11 @@ route regardless of ISL cost, so `mpc-congestion` is a provable no-op there
 Dr. Liu: *"Hierarchical MPC -- one MPC to select the best path, another one
 [for the rest]."* `hier.py`'s original split was admission/budget vs depth,
 with **static routing at both levels**, so the routing/depth split was never
-actually built. It now exists in two forms, and both are reported.
+actually built. It grew into two forms: `Two-Level-MPC` (below, active,
+kept) and `mpc-hier-route` (**ARCHIVED 2026-09-21** per Xuanhao's ask --
+`hier.py` moved to `archive/hier.py`, no longer imported anywhere active;
+its subsection below is kept for engineering-history provenance only, not
+as documentation of live code).
 
 ### Candidate path sets
 
@@ -354,7 +362,7 @@ Verified: $K{=}1$ is bit-identical to `build()`; at $K{=}3$, 88% of
 $(k,\tau)$ pairs get $\ge 2$ distinct candidates, every hop is feasible in
 `isl_ok`/`gsl_ok`, and delays are non-decreasing across rounds.
 
-### `mpc-2level` — iterated peers (`twolevel.py`)
+### `Two-Level-MPC` — iterated peers (`twolevel.py`, code-internal name `mpc-2level`)
 
 Routing MPC = min-cost multicommodity flow, continuous, so a pure LP:
 
@@ -376,17 +384,17 @@ multipath enter the depth problem **without adding any path variables to it**.
 
 They exchange demand $\leftrightarrow$ mix and iterate with the same MSA
 damping ($\eta = 1/(it{+}2)$) and keep-best-iterate the predictive router
-already uses. Iteration 0 *is* the flat MPC, so `mpc-2level` can never plan
-worse than `mpc`. Verified: `MPC2L_ITERS=1, MPC_ROUTE_NPATHS=1` reproduces
-`mpc` bit-for-bit.
+already uses. Iteration 0 *is* the flat MPC, so `Two-Level-MPC` can never
+plan worse than `Flat-MPC`. Verified: `MPC2L_ITERS=1, MPC_ROUTE_NPATHS=1`
+reproduces `Flat-MPC` bit-for-bit.
 
 > **A correctness trap worth recording.** $D_{k,\tau}$ must be what a task
 > *wants* to move, not what the depth MILP already conceded. Deriving it from
 > the previous plan is circular: that plan was already feasible against the
 > static single paths, so the routing LP faces no contention, finds the
 > shortest path optimal for everything, and reproduces Dijkstra. The first
-> implementation did exactly this, and `mpc-2level` came out **bit-for-bit
-> equal to `mpc`** even on a fabric with 30% of links oversubscribed. The
+> implementation did exactly this, and `Two-Level-MPC` came out **bit-for-bit
+> equal to `Flat-MPC`** even on a fabric with 30% of links oversubscribed. The
 > honest demand is what the encoder can supply and the task still owes
 > (`_desired_bits`); with that fixed, 35% of $(k,\tau)$ decisions become
 > genuinely multipath (mean 1.40 paths).
@@ -444,6 +452,12 @@ a more abstract decision (a serving-GBS assignment, or a route *class*) might
 survive; that is future work, not something measured here.
 
 ## Hierarchical MPC + the rotting-backlog fix
+
+**ARCHIVED 2026-09-21** (Xuanhao's ask) -- `mpc-hier` is no longer part of
+the scheduler comparison; `hier.py` moved to `archive/hier.py`. Section
+kept for engineering-history provenance (the rotting-backlog fix it
+describes influenced `Two-Level-MPC`'s own backpressure handling), not as
+documentation of live code.
 
 Dr. Liu: *"hierarchical MPC ... one MPC to select the best path, another
 one [for the rest]"*. Implemented in `oec_sim/hier.py`, scheduler
@@ -509,11 +523,11 @@ MILP dual bound 65.22, and every scheduler is within that:
 
 | scheduler | utility | gap to bound |
 |---|---|---|
-| mpc | 64.95 | 0.4% |
+| Flat-MPC | 64.95 | 0.4% |
 | greedy-adaptive | 64.12 | 1.7% |
 | greedy-fixed-8 | 64.15 | 1.6% |
 | greedy-fixed-4 | 62.25 | 4.5% |
-| mpc-hier | 61.4 | 5.9% |
+| mpc-hier (archived) | 61.4 | 5.9% |
 | greedy-fixed-2 | 58.85 | 9.8% |
 | greedy-fixed-16 | 24.43 | 62.5% |
 
@@ -589,7 +603,7 @@ in the repo yet" (meeting_script_oec.txt, section 4/6). Full grid: 6 rates
 x 5 seeds x 6 schedulers = **180 rows**, `oec_scenario/sweep/results.csv`,
 `plots/sweep_utility_vs_load.png`. Mean utility by rate (5-seed average):
 
-| GBS rate (Mbps) | best fixed depth | best-fixed utility | mpc utility |
+| GBS rate (Mbps) | best fixed depth | best-fixed utility | Flat-MPC utility |
 |---|---|---|---|
 | 0.75 | depth-2 | 57.08 | **60.34** |
 | 1.0 | depth-4 | 60.38 | **61.18** |

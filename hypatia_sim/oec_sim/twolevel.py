@@ -53,11 +53,11 @@ class RouteMix:
 
 
 class TwoLevelMPCScheduler(MPCScheduler):
-    name = 'mpc-2level'
+    name = 'Two-Level-MPC'
 
     def __init__(self, topo, tasks, horizon=None):
         super().__init__(topo, tasks, horizon=horizon, route_mode='static')
-        self.name = 'mpc-2level'
+        self.name = 'Two-Level-MPC'
         self.predictor = R.PredictiveRouter(topo, self.isl_index)
         self.route_rows = []          # for routes_<sched>.csv
 
