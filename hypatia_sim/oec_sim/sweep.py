@@ -170,10 +170,38 @@ def run_ppo_eval(legacy_path, unified_path, quick=False):
             for seed in seeds:
                 with C.config_override(RNG_SEED=seed):
                     makers = [
+                        ('mpc', lambda tp, tk: MPCScheduler(tp, tk)),
+                        ('greedy-adaptive',
+                         lambda tp, tk: GreedyScheduler(tp, tk, depth=None)),
+                        ('greedy-fixed-2',
+                         lambda tp, tk: GreedyScheduler(tp, tk, depth=2)),
+                        ('greedy-fixed-4',
+                         lambda tp, tk: GreedyScheduler(tp, tk, depth=4)),
+                        ('greedy-fixed-8',
+                         lambda tp, tk: GreedyScheduler(tp, tk, depth=8)),
+                        ('greedy-fixed-16',
+                         lambda tp, tk: GreedyScheduler(tp, tk, depth=16)),
+                    ]
+
+                    for name, make in makers:
+                        tk = TK.generate_tasks(topo)
+                        tot_img = sum(k.n_images for k in tk)
+                        sched = make(topo, tk)
+                        t0 = time.time()
+                        hist = sched.run()
+                        wall_s = time.time() - t0
+                        rows.append(_row(rate, seed, name, tk, hist,
+                                         tot_img, wall_s, obj=sched))
+                        print(f'  rate={rate:4.2f}Mbps seed={seed:3d} '
+                              f'{name:16s} util={hist["utility"][-1]:7.2f} '
+                              f'({wall_s:5.1f}s)', flush=True)
+
+                    ppo_makers = [
                         ('ppo-legacy', legacy_path),
                         ('ppo-unified', unified_path),
                     ]
-                    for name, path in makers:
+
+                    for name, path in ppo_makers:
                         tk = TK.generate_tasks(topo)
                         tot_img = sum(k.n_images for k in tk)
                         sched = RLScheduler(topo, tk, model_path=path)
@@ -186,7 +214,6 @@ def run_ppo_eval(legacy_path, unified_path, quick=False):
                         print(f'  rate={rate:4.2f}Mbps seed={seed:3d} '
                               f'{name:16s} util={hist["utility"][-1]:7.2f} '
                               f'({wall_s:5.1f}s)', flush=True)
-
     path = os.path.join(OUT_DIR, 'results_ppo_eval.csv')
     with open(path, 'w', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
