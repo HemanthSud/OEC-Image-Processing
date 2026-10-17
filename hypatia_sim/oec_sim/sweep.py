@@ -214,8 +214,12 @@ def run_ppo_eval(legacy_path, unified_path, quick=False):
                         print(f'  rate={rate:4.2f}Mbps seed={seed:3d} '
                               f'{name:16s} util={hist["utility"][-1]:7.2f} '
                               f'({wall_s:5.1f}s)', flush=True)
-    path = os.path.join(OUT_DIR, 'results_ppo_eval.csv')
-    with open(path, 'w', newline='') as f:
+    from datetime import datetime
+    run_type = 'quick' if quick else 'full'
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'results_ppo_eval_integrated_{run_type}_{timestamp}.csv'
+    path = os.path.join(OUT_DIR, filename)
+    with open(path, 'x', newline='') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
