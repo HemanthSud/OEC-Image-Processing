@@ -226,6 +226,34 @@ _SCENARIOS = {
                                MAX_TASKS=2000, AOI_COOLDOWN_S=8,
                                TASK_SIZE_MODE='data_gb',
                                TASK_DATA_GB_MIN=0.1, TASK_DATA_GB_MAX=5.0),
+    # 'realistic-bigdata-routing' (2026-10-20, NORMALIZATION_FINDINGS.md
+    # Finding 2): 'realistic-bigdata' can never show routing differentiation
+    # because at Gbps rates a task's own ISL/GSL/GBS transmission time
+    # (~0.8s/GB) is ~4 orders of magnitude faster than its encode time
+    # (~2.44h/GB) -- every task is encoder-dead long before the network
+    # could matter. This scenario fixes that by (a) scaling each task's
+    # deadline to its OWN encode time plus slack (TASK_DEADLINE_MODE=
+    # 'scaled', see tasks.py) instead of a fixed 30-60min window, so
+    # encoding finishes with room to spare, and (b) dropping ISL/GSL/GBS to
+    # 'fabric-limited'-style scarce rates so many tasks' encoded backlogs
+    # genuinely compete for capacity instead of draining instantly. GB
+    # range and MAX_TASKS: calibrated 2026-10-20 via a greedy-fixed-16 probe
+    # (cheap, no MILP) over ISL/GSL/GBS candidates, same process used for
+    # 'fabric-limited'/'realistic-bigdata'. Confirmed deadline scaling works
+    # as intended: deadlines land well inside the 18,030s sim horizon
+    # (3,032-10,061s observed, mean 6,573s) and 0/500 tasks exceed their own
+    # encode ceiling (vs. ~100% at 'realistic-bigdata' sizes/deadlines).
+    # Rate sweep at these deadlines: 100/200/300 Mbps -> 100% delivered (no
+    # contention at all); 10/20/30 Mbps -> 73.2% (chosen: real contention,
+    # not degenerate); 5/10/15 -> 41.0%; 2/5/8 -> 21.6%; 1/2/4 -> 10.8% (the
+    # last two are too tight -- same shape as 'fabric-limited's own
+    # 0.5 Mbps rejection, no alternative has capacity either).
+    'realistic-bigdata-routing': dict(
+        ISL_RATE_BPS=10e6, GSL_RATE_BPS=20e6, GS_RATE_BPS=30e6,
+        LOAD_SCALE=1.0, MAX_TASKS=500, AOI_COOLDOWN_S=8,
+        TASK_SIZE_MODE='data_gb',
+        TASK_DATA_GB_MIN=0.3, TASK_DATA_GB_MAX=1.0,
+        TASK_DEADLINE_MODE='scaled'),
 }
 
 
@@ -237,6 +265,7 @@ def apply_scenario(name):
     global SCENARIO, ISL_RATE_BPS, GSL_RATE_BPS, GS_RATE_BPS, LOAD_SCALE
     global TASK_IMAGES_MIN, TASK_IMAGES_MAX, MAX_TASKS, AOI_COOLDOWN_S, AOIS
     global TASK_SIZE_MODE, TASK_DATA_GB_MIN, TASK_DATA_GB_MAX
+    global TASK_DEADLINE_MODE
     global MPC_HORIZON_SLOTS
     sc = _SCENARIOS[name]
     SCENARIO = name
@@ -261,6 +290,13 @@ def apply_scenario(name):
     TASK_SIZE_MODE   = sc.get('TASK_SIZE_MODE', 'images')
     TASK_DATA_GB_MIN = sc.get('TASK_DATA_GB_MIN')
     TASK_DATA_GB_MAX = sc.get('TASK_DATA_GB_MAX')
+    # TASK_DEADLINE_MODE='scaled' (only 'realistic-bigdata-routing' sets
+    # this; every other scenario falls back to 'fixed', today's bit-for-bit
+    # behavior: deadline drawn uniformly from [TASK_DEADLINE_MIN_S,
+    # TASK_DEADLINE_MAX_S] independent of task size). 'scaled' instead sets
+    # each task's deadline from its OWN encode time (see tasks.py
+    # generate_tasks() and the 'realistic-bigdata-routing' comment above).
+    TASK_DEADLINE_MODE = sc.get('TASK_DEADLINE_MODE', 'fixed')
     # MPC planning horizon, scenario-scoped (see 'realistic-bigdata' comment
     # above for why) -- every scenario that doesn't define it falls back to
     # 60 slots/30min, today's bit-for-bit behavior.
@@ -334,6 +370,13 @@ N_GS = len(GROUND_STATIONS)
 # above (scenario-scoped, see _SCENARIOS)
 TASK_DEADLINE_MIN_S = 1_800
 TASK_DEADLINE_MAX_S = 3_600
+# Only used when TASK_DEADLINE_MODE='scaled' (tasks.py): a task's deadline
+# becomes slack * (n_images / ENC_IMGS_PER_S), i.e. slack x its own encode
+# time, floored at TASK_DEADLINE_MIN_S. 1.15 leaves real but modest room for
+# network transmission/queueing after encoding -- not so generous that the
+# deadline pushes past the simulation horizon for the scenario's GB range
+# (see 'realistic-bigdata-routing').
+TASK_DEADLINE_SLACK_FACTOR = 1.15
 TASK_WEIGHTS     = [1, 2, 3]        # importance w_k, drawn uniformly
 FRESHNESS_ALPHA  = 1.0 / 300.0      # phi_k decay rate after soft deadline
 RNG_SEED         = 42
@@ -399,6 +442,16 @@ TASK_SIZE_REF_DEPTH = max(DEPTHS)
 # already ran above (module-load time), so a bare assignment here would
 # silently clobber it back to a fixed value for every scenario.
 MPC_RESOLVE_EVERY = 5      # re-solve at least every 5 slots (and on arrivals)
+
+# Task-2 feasibility check: distinct from MPC_REPLAN_TIME_BUDGET_S above,
+# which only bounds the inner route-refinement loop. These are compared
+# against the TOTAL wall time of one _solve() call, after it finishes, to
+# decide whether to commit the fresh plan or keep running the previous one.
+MPC_SOLVE_BUDGET_SLOT_S  = SLOT_S                      # 30s: beat the very
+                                                        # next simulated slot?
+MPC_SOLVE_BUDGET_STALE_S = MPC_RESOLVE_EVERY * SLOT_S  # 150s: outer bound
+                                                        # before a stale plan
+                                                        # is unacceptable
 # MPC_LAMBDA_QUEUE (lambda_1, early-delivery backlog weight) removed
 # 2026-09-21 -- ablated per Xuanhao's Eq. 22 request, confirmed negligible
 # (<=0.1% utility delta, no solve-time change, 5 seeds x 3 schedulers), see

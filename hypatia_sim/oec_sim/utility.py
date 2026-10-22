@@ -216,6 +216,40 @@ def energy_joules(images, q):
     return enc, tx
 
 
+def reward_norm(task):
+    """The per-task reward normalizer N_k used everywhere a coverage
+    fraction is computed (accumulate, y_coeff, objective_tardiness_coeff,
+    SegmentBlock). Capped at the number of images the task could possibly
+    have *encoded by its own deadline* (task.encoded_by(task.deadline_s)),
+    not the raw requested volume.
+
+    Why: with the raw task.n_images as the denominator, the per-image reward
+    is c/N_k for every N_k -- so a task whose requested volume is 10x what
+    it could ever physically deliver before its deadline gets a 10x smaller
+    per-image reward than one sized to exactly fit, even though neither can
+    do better than the achievable ceiling. That structurally devalues large
+    tasks under the data-volume scenarios (config.py's 'realistic-bigdata'
+    KNOWN ISSUE) independent of their actual importance, pushing the MILP to
+    abandon them in favor of fully completing many small tasks -- confirmed
+    2026-10-20 by tracing the 1/N_k coefficient through to this exact
+    mechanism.
+
+    SCOPED to TASK_SIZE_MODE='data_gb' only (i.e. only 'realistic-bigdata').
+    Checked empirically 2026-10-20: 27/64 tasks in the default 'gbs-limited'
+    scenario ALSO exceed their own deadline-encode ceiling (TASK_IMAGES_MAX
+    was never designed against ENC_IMGS_PER_S x deadline), so capping
+    unconditionally changes every already-published golden number across the
+    paper (confirmed: breaks --check-golden, every scheduler's utility moves).
+    Gating on TASK_SIZE_MODE keeps every 'images'-mode scenario (every
+    existing table) bit-for-bit identical to before -- only the data-volume
+    scenario this fix targets is affected.
+    """
+    if C.TASK_SIZE_MODE != 'data_gb':
+        return float(task.n_images)
+    return max(1.0, min(float(task.n_images),
+                        task.encoded_by(task.deadline_s)))
+
+
 def objective_tardiness_coeff(task, t_arrive):
     """The legacy objective-only tardiness regularizer (MPC_LAMBDA_LATE). It
     was never part of the reported score, so it stays separate from T_k;
@@ -225,7 +259,7 @@ def objective_tardiness_coeff(task, t_arrive):
         return 0.0
     late_s = max(0.0, t_arrive - task.deadline_s)
     return (C.MPC_LAMBDA_LATE * task.weight
-            * late_s / C.TARDINESS_REF_S / task.n_images)
+            * late_s / C.TARDINESS_REF_S / reward_norm(task))
 
 
 # ── realized side ────────────────────────────────────────────────────────────
@@ -241,7 +275,7 @@ def _acc(task):
 def accumulate(task, images, t_arrive):
     """Credit a delivery and return the increment to U_k. This is the whole of
     the realized score; schedulers._record_delivery calls nothing else."""
-    frac = images / task.n_images
+    frac = images / reward_norm(task)
     phi = task.freshness(t_arrive)
     gain = _acc(task).add(frac, phi)
     w = weight(task)
@@ -343,7 +377,7 @@ def y_coeff(task, q, t_arrive, w=None):
         c -= C.UTIL_W_TARDY * w * tardiness_coeff(task, t_arrive)
     if C.UTIL_W_COST:
         c -= C.UTIL_W_COST * w * cost_coeff(q)
-    return c / task.n_images
+    return c / reward_norm(task)
 
 
 def seg_coeff(task, q, t_arrive, j, w=None):
@@ -452,7 +486,7 @@ class SegmentBlock:
         for g, keys in self._members.items():
             k = task_by_id[g[0]]
             ent = [(self.li[(g, j)], 1.0) for j in range(self.n_seg)]
-            ent += [(yi[key], -1.0 / k.n_images) for key in keys]
+            ent += [(yi[key], -1.0 / reward_norm(k)) for key in keys]
             add(ent, 0.0, 0.0)
         by_task = {}
         for g in self._members:
@@ -460,7 +494,7 @@ class SegmentBlock:
         for kid, groups in by_task.items():
             k = task_by_id[kid]
             rho = rho_of(k) if rho_of is not None else min(
-                1.0, k.delivered / k.n_images)
+                1.0, k.delivered / reward_norm(k))
             widths = residual_widths(rho)
             for j in range(self.n_seg):
                 ent = [(self.li[(g, j)], 1.0) for g in groups]

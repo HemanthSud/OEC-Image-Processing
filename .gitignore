@@ -16,3 +16,7 @@ FLAIR-1-main/
 hypatia/
 graphify-out/
 /hypatia_sim/oec_scenario/sweep/*_quick.csv
+# Disposable multi-seed ablation scratch, not cited anywhere (RESULTS_INDEX.md
+# only cites oec_scenario/, oec_scenario_couplings/, oec_scenario_D2-16_backup/
+# as source-of-truth results dirs).
+/hypatia_sim/oec_scenario_seed*/

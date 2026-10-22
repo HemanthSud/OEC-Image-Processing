@@ -61,6 +61,15 @@ def _edge_keys(topo, isl_index, t, task):
                                 isl_index)
 
 
+def _tag_solve_log_rows(log, start_idx, **fields):
+    """Stamp every solve_log row appended since start_idx with call-level
+    fields (total_wall_s/overran_30s/overran_150s/committed) so every row for
+    a scheduler carries the same keys -- run_all.py's csv.DictWriter derives
+    fieldnames from the first row."""
+    for row in log[start_idx:]:
+        row.update(fields)
+
+
 def _iter_shares(keys):
     """Yield (edge_key, share) for a route entry.
 
@@ -119,12 +128,20 @@ class _Base:
 
     def run(self):
         """Simulate all slots; returns per-slot aggregate history."""
+        import os
+        _progress = bool(os.environ.get('OEC_PROGRESS'))
+        _t_run_start = time.perf_counter() if _progress else None
         hist = {'t_s': [], 'delivered_images': [], 'utility': [],
                 'backlog_bits': [], 'n_active': [], 'n_dropped': []}
         for t in range(C.N_SLOTS):
             active = [k for k in self.tasks
                       if k.arrival_slot <= t and k.delivered < k.n_images - 1e-6
                       and not k.dropped]
+            if _progress and t % 50 == 0:
+                print(f'[progress] {self.name:14s} t={t:4d}/{C.N_SLOTS} '
+                     f'n_active={len(active):5d} '
+                     f'elapsed={time.perf_counter() - _t_run_start:7.1f}s',
+                     flush=True)
             if active:
                 self.decide(t, active)
             backlog = sum((k.n_images - k.delivered)
@@ -219,6 +236,9 @@ class MPCScheduler(_Base):
         self.plan = {}           # (kid, q, abs_slot) -> images
         self.plan_paths = {}     # (kid, abs_slot) -> keys, for _execute
         self.plan_delay = {}     # (kid, abs_slot) -> route delay s, for _execute
+        self.route_rows = []     # for routes_<sched>.csv; only populated when
+                                  # route_mode='predictive' (OrbitFlow) -- Flat-
+                                  # MPC's static routing has nothing to report
         self.last_solve = -10**9
         self.known = set()
 
@@ -266,6 +286,7 @@ class MPCScheduler(_Base):
         n_rounds = C.MPC_ROUTE_ITERS if self.route_mode == 'predictive' else 1
         load, best, best_rs, best_paths = {}, None, None, None
         t_start = time.perf_counter()
+        log_start_idx = len(self.solve_log)
         for it in range(max(1, n_rounds)):
             if self.route_mode == 'predictive' and it > 0:
                 paths, rs = self._paths_predictive(t, H, active, load)
@@ -293,9 +314,34 @@ class MPCScheduler(_Base):
             if time.perf_counter() - t_start > C.MPC_REPLAN_TIME_BUDGET_S:
                 break
 
+        total_wall_s = time.perf_counter() - t_start
+        overran_30s  = total_wall_s > C.MPC_SOLVE_BUDGET_SLOT_S
+        overran_150s = total_wall_s > C.MPC_SOLVE_BUDGET_STALE_S
+
         if best is None:
+            _tag_solve_log_rows(self.solve_log, log_start_idx,
+                                total_wall_s=round(total_wall_s, 4),
+                                overran_30s=overran_30s,
+                                overran_150s=overran_150s, committed=False)
             self.plan, self.plan_paths, self.plan_delay = {}, {}, {}
             return
+
+        if overran_150s:
+            # Solve took too long to be worth trusting as "the current
+            # decision" -- keep executing whatever self.plan/plan_paths/
+            # plan_delay already hold from the last committed solve (or {}
+            # if this is the very first solve) rather than committing a plan
+            # that's already stale by more than the mandatory re-plan cadence.
+            _tag_solve_log_rows(self.solve_log, log_start_idx,
+                                total_wall_s=round(total_wall_s, 4),
+                                overran_30s=overran_30s,
+                                overran_150s=overran_150s, committed=False)
+            return
+        _tag_solve_log_rows(self.solve_log, log_start_idx,
+                            total_wall_s=round(total_wall_s, 4),
+                            overran_30s=overran_30s,
+                            overran_150s=overran_150s, committed=True)
+
         self.plan = best['plan']
         # Execute against the *winning* iterate's routes. Re-deriving them here
         # from the post-loop `load` (as an earlier version did) could hand
@@ -311,6 +357,25 @@ class MPCScheduler(_Base):
         self.plan_delay = {(k.kid, t + tau): self._delay_for(t, tau, k, best_rs)
                            for k in active for tau in range(H)
                            if (k.kid, tau) in best_paths}
+        # OrbitFlow (route_mode='predictive') routing output: one row per
+        # task for the slot just committed (tau==0). Single-path Dijkstra,
+        # not a flow LP, so there's no fractional split to report -- path_id/
+        # share/n_paths are always 0/1.0/1, unlike Two-Level-MPC's route_rows.
+        # Flat-MPC (route_mode='static') has no routing decision to report,
+        # so self.route_rows stays empty and no routes_Flat-MPC.csv is written.
+        if self.route_mode == 'predictive':
+            for k in active:
+                keys = self.plan_paths.get((k.kid, t))
+                if keys is None:
+                    continue
+                # _edge_keys_from_path emits two capacity-edge keys for the
+                # final GSL hop (('gsl', u, g) and ('gs', g)) but one per ISL
+                # hop, so len(keys) overcounts physical hops by exactly 1.
+                self.route_rows.append(dict(
+                    t_s=t * C.SLOT_S, kid=k.kid, path_id=0, share=1.0,
+                    hops=len(keys) - 1,
+                    delay_s=round(self.plan_delay.get((k.kid, t), 0.0), 6),
+                    n_paths=1))
         # commit depth for tasks the plan actually starts transmitting
         for k in active:
             if k.depth is None:

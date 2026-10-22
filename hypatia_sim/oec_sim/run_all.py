@@ -286,6 +286,22 @@ def build_summary(topo, results):
         L.append(f'  {name:16s} {len(log):4d} solves   '
                  f'mean {np.mean(ms):7.1f} ms   p95 {np.percentile(ms, 95):7.1f} ms   '
                  f'max {np.max(ms):7.1f} ms   total {sum(ms) / 1e3:6.1f} s')
+        # Task-2 feasibility check: dedupe by t_s since every row from one
+        # _solve() call shares the same call-level total_wall_s/overran_*/
+        # committed flags (older golden runs predate this instrumentation and
+        # simply have no such keys, hence the 'committed' in ... guard).
+        by_call = {}
+        for r in log:
+            by_call.setdefault(r['t_s'], r)
+        calls = list(by_call.values())
+        if calls and 'committed' in calls[0]:
+            n_over30 = sum(1 for c in calls if c.get('overran_30s'))
+            n_over150 = sum(1 for c in calls if c.get('overran_150s'))
+            n_stale = sum(1 for c in calls if not c.get('committed'))
+            L.append(f'  {" ":16s} {len(calls):4d} _solve() calls   '
+                     f'{n_over30} over {C.MPC_SOLVE_BUDGET_SLOT_S:.0f}s   '
+                     f'{n_over150} over {C.MPC_SOLVE_BUDGET_STALE_S:.0f}s '
+                     f'(plan NOT committed, ran stale)   {n_stale} stale total')
     L.append('')
 
     L.append('Outputs in oec_scenario/: contact_windows.csv, topology_state.csv,')

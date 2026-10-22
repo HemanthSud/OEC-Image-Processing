@@ -38,7 +38,8 @@ from scipy.sparse import csr_matrix
 
 from . import config as C
 from . import routing as R
-from .schedulers import MPCScheduler, _edge_keys_from_path, _cap_bits
+from .schedulers import (MPCScheduler, _edge_keys_from_path, _cap_bits,
+                        _tag_solve_log_rows)
 
 
 @dataclass
@@ -240,6 +241,8 @@ class TwoLevelMPCScheduler(MPCScheduler):
             return
         H_r = min(H, C.MPC2L_ROUTE_HORIZON)
         t_start = time.perf_counter()
+        log_start_idx = len(self.solve_log)
+        route_rows_start_idx = len(self.route_rows)
 
         # iteration 0 is exactly the flat MPC, which is both the warm start
         # and the guarantee that this scheduler can never plan worse than mpc
@@ -248,6 +251,10 @@ class TwoLevelMPCScheduler(MPCScheduler):
         self._log(t, 0, active, sol)
         best, best_paths, best_delay = sol, paths, None
         if sol['status'] != 'optimal':
+            _tag_solve_log_rows(self.solve_log, log_start_idx,
+                                total_wall_s=round(time.perf_counter() - t_start, 4),
+                                overran_30s=False, overran_150s=False,
+                                committed=False)
             self.plan, self.plan_paths, self.plan_delay = {}, {}, {}
             return
 
@@ -282,6 +289,25 @@ class TwoLevelMPCScheduler(MPCScheduler):
                     break
             if time.perf_counter() - t_start > C.MPC_REPLAN_TIME_BUDGET_S:
                 break
+
+        total_wall_s = time.perf_counter() - t_start
+        overran_30s  = total_wall_s > C.MPC_SOLVE_BUDGET_SLOT_S
+        overran_150s = total_wall_s > C.MPC_SOLVE_BUDGET_STALE_S
+
+        if overran_150s:
+            # Discard this call's speculative route rows (recorded mid-loop by
+            # _record_routes for every optimal iterate, not just the winner)
+            # along with the plan -- nothing from this call is being committed.
+            del self.route_rows[route_rows_start_idx:]
+            _tag_solve_log_rows(self.solve_log, log_start_idx,
+                                total_wall_s=round(total_wall_s, 4),
+                                overran_30s=overran_30s,
+                                overran_150s=overran_150s, committed=False)
+            return
+        _tag_solve_log_rows(self.solve_log, log_start_idx,
+                            total_wall_s=round(total_wall_s, 4),
+                            overran_30s=overran_30s,
+                            overran_150s=overran_150s, committed=True)
 
         self.plan = best['plan']
         self.plan_paths = {(kid, t + tau): keys

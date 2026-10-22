@@ -365,6 +365,146 @@ def run_realistic_datasize(grid_gb=REALISTIC_DATASIZE_GRID_GB,
     return _realistic_datasize_sensitivity(grid_gb, seeds, max_tasks, quick)
 
 
+# ── Part 13: scaled task-size + bandwidth sweep ─────────────────────────────
+# Part 12 above varies only the GB range, holding ISL/GSL/GBS fixed at
+# 'realistic-bigdata''s nominal 10/1/10 Gbps. This scales the GB range AND
+# the three rates together by a common factor, to test whether the KNOWN
+# ISSUE collapse (config.py's 'realistic-bigdata' comment: Flat-MPC/OrbitFlow/
+# Two-Level-MPC collapsing to identical worse-than-greedy behavior at the
+# congested end) is scale-dependent or persists at every absolute scale. Does
+# NOT attempt to fix that collapse -- it's flagged in config.py as a core-
+# formulation question needing Hemanth's/Xuanhao's input, not a parameter to
+# silently retune.
+REALISTIC_DATASIZE_SCALE_FACTORS = [1, 2, 5]
+REALISTIC_DATASIZE_BASE_RATES_GBPS = dict(isl=10, gsl=1, gbs=10)  # 1x = today's
+                                                                  # nominal rates
+
+
+def _scaled_datasize_grid_gb(scale, base=REALISTIC_DATASIZE_GRID_GB):
+    """Scale every (lo, hi) GB tuple in `base` by `scale`, preserving the
+    control-point/congested-point shape. At scale=2 this reproduces exactly
+    0.2-10GB (0.1*2 .. 5.0*2) across the whole grid."""
+    return [(round(lo * scale, 4), round(hi * scale, 4)) for lo, hi in base]
+
+
+def _run_one_combo(combo):
+    """Run exactly one (scale, gb_min, gb_max, seed, scheduler) point and
+    return its result row. Top-level/picklable so ProcessPoolExecutor can
+    ship it to a worker process; each call is fully self-contained (builds
+    its own topology/config state) since worker processes share no memory
+    with the parent or each other."""
+    from .twolevel import TwoLevelMPCScheduler
+    scale, lo, hi, seed, name, max_tasks = combo
+    isl = REALISTIC_DATASIZE_BASE_RATES_GBPS['isl'] * scale * 1e9
+    gsl = REALISTIC_DATASIZE_BASE_RATES_GBPS['gsl'] * scale * 1e9
+    gbs = REALISTIC_DATASIZE_BASE_RATES_GBPS['gbs'] * scale * 1e9
+    makers = {
+        'Flat-MPC': lambda tp, tk: MPCScheduler(tp, tk),
+        'OrbitFlow': lambda tp, tk: MPCScheduler(tp, tk, route_mode='predictive'),
+        'Two-Level-MPC': lambda tp, tk: TwoLevelMPCScheduler(tp, tk),
+        'greedy-fixed-16': lambda tp, tk: GreedyScheduler(tp, tk, depth=16),
+    }
+    with C.config_override(scenario='realistic-bigdata'):
+        with C.config_override(MAX_TASKS=max_tasks, ISL_RATE_BPS=isl,
+                               GSL_RATE_BPS=gsl, GS_RATE_BPS=gbs,
+                               TASK_DATA_GB_MIN=lo, TASK_DATA_GB_MAX=hi,
+                               RNG_SEED=seed):
+            topo = T.build_topology()
+            tk = TK.generate_tasks(topo)
+            tot_img = sum(k.n_images for k in tk)
+            sched = makers[name](topo, tk)
+            t0 = time.time()
+            hist = sched.run()
+            wall_s = time.time() - t0
+    row = _row(hi, seed, name, tk, hist, tot_img, wall_s, obj=sched,
+              rate_key='data_gb_max')
+    row['scale'] = scale
+    row['isl_gbps'] = isl / 1e9
+    row['gsl_gbps'] = gsl / 1e9
+    row['gbs_gbps'] = gbs / 1e9
+    row['data_gb_min'] = lo
+    return row
+
+
+def _realistic_datasize_scaled_sensitivity(scales, grid_gb_base, seeds,
+                                           max_tasks, quick, workers=16):
+    if quick:
+        scales, seeds = scales[:2], seeds[:1]
+    os.makedirs(OUT_DIR, exist_ok=True)
+    out_name = f'results_realistic_datasize_scaled{"_quick" if quick else ""}.csv'
+    path = os.path.join(OUT_DIR, out_name)
+
+    # Resume support: an interruption (e.g. a server maintenance shutdown)
+    # can kill this mid-grid. Rows already written to `path` are preserved
+    # and their (scale, gb_min, gb_max, seed, scheduler) combo is skipped on
+    # relaunch, so re-running the exact same command after a restart only
+    # computes what's missing instead of redoing the whole grid.
+    rows = []
+    done = set()
+    if os.path.exists(path):
+        with open(path, newline='') as f:
+            for r in csv.DictReader(f):
+                rows.append(r)
+                done.add((r['scale'], r['data_gb_min'], r['data_gb_max'],
+                         r['seed'], r['scheduler']))
+        if rows:
+            print(f'resuming {out_name}: {len(rows)} rows already done, '
+                 'skipping those', flush=True)
+
+    # The 4 scheduler x N grid-point x M scale combos are fully independent
+    # (each builds its own topology/task set), so they're farmed out across
+    # worker processes instead of run one at a time in this process -- the
+    # grid is CPU-bound and embarrassingly parallel, and a server-class box
+    # has far more idle cores than this would ever use serially.
+    combos = []
+    for scale in scales:
+        for lo, hi in _scaled_datasize_grid_gb(scale, grid_gb_base):
+            for seed in seeds:
+                for name in ('Flat-MPC', 'OrbitFlow', 'Two-Level-MPC',
+                            'greedy-fixed-16'):
+                    key = (str(scale), str(lo), str(hi), str(seed), name)
+                    if key in done:
+                        continue
+                    combos.append((scale, lo, hi, seed, name, max_tasks))
+
+    if not combos:
+        print(f'nothing to do, {out_name} already has every combo', flush=True)
+        return rows
+
+    workers = min(workers, len(combos))
+    print(f'running {len(combos)} combos across {workers} worker processes',
+         flush=True)
+    import concurrent.futures as cf
+    with cf.ProcessPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_run_one_combo, c): c for c in combos}
+        for fut in cf.as_completed(futures):
+            scale, lo, hi, seed, name, _ = futures[fut]
+            row = fut.result()
+            rows.append(row)
+            print(f'  scale={scale}x gb=[{lo},{hi}] seed={seed:3d} {name:14s} '
+                 f'util={row["utility"]:9.2f} delivery={row["delivery_frac"]:.3f} '
+                 f'viol={row["violation_frac"]:.3f} ({row["wall_s"]:7.1f}s)',
+                 flush=True)
+            with open(path, 'w', newline='') as f:
+                w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                w.writeheader(); w.writerows(rows)
+    print(f'wrote {len(rows)} rows -> {os.path.relpath(path)}')
+    return rows
+
+
+def run_realistic_datasize_scaled(scales=REALISTIC_DATASIZE_SCALE_FACTORS,
+                                  grid_gb=REALISTIC_DATASIZE_GRID_GB,
+                                  seeds=REALISTIC_DATASIZE_SWEEP_SEEDS,
+                                  max_tasks=REALISTIC_DATASIZE_MAX_TASKS,
+                                  quick=False, workers=16):
+    """Vary task data volume AND ISL/GSL/GBS rates together, 1x/2x/5x, to
+    test whether the KNOWN ISSUE collapse (config.py's 'realistic-bigdata'
+    comment) is scale-dependent. Does not attempt to fix it. Combos run in
+    parallel across `workers` processes -- see _realistic_datasize_scaled_sensitivity."""
+    return _realistic_datasize_scaled_sensitivity(scales, grid_gb, seeds,
+                                                  max_tasks, quick, workers)
+
+
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser()
@@ -382,6 +522,13 @@ if __name__ == '__main__':
     ap.add_argument('--realistic-datasize', action='store_true',
                     help="Part 12: vary per-task data volume under "
                          "'realistic-bigdata' (Xuanhao's ask)")
+    ap.add_argument('--realistic-datasize-scaled', action='store_true',
+                    help="Part 13: vary per-task data volume AND ISL/GSL/GBS "
+                         "rates together, 1x/2x/5x, to test whether the KNOWN "
+                         "ISSUE collapse is scale-dependent")
+    ap.add_argument('--workers', type=int, default=16,
+                    help="Part 13 only: number of worker processes to run "
+                         "grid combos in parallel across (default 16)")
     ap.add_argument('--utility', default=C.UTIL_MODE,
                     choices=('legacy', 'unified'))
     args = ap.parse_args()
@@ -394,6 +541,8 @@ if __name__ == '__main__':
         run_realistic_gbs(quick=args.quick)
     elif args.realistic_datasize:
         run_realistic_datasize(quick=args.quick)
+    elif args.realistic_datasize_scaled:
+        run_realistic_datasize_scaled(quick=args.quick, workers=args.workers)
     elif args.couplings:
         run_couplings(quick=args.quick)
     else:

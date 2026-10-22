@@ -83,14 +83,37 @@ def generate_tasks(topo):
             else:
                 n_images_k = int(rng.integers(C.TASK_IMAGES_MIN,
                                               C.TASK_IMAGES_MAX + 1))
-            tasks.append(Task(
-                kid=len(tasks), aoi=aoi['name'], src_sat=src,
-                dst_gs=_nearest_gs(aoi), arrival_slot=t,
-                n_images=n_images_k,
-                weight=int(rng.choice(C.TASK_WEIGHTS)),
-                deadline_s=int(t * C.SLOT_S
-                               + rng.integers(C.TASK_DEADLINE_MIN_S,
-                                              C.TASK_DEADLINE_MAX_S + 1)),
-            ))
+            if C.TASK_DEADLINE_MODE == 'scaled':
+                # Deadline set from this task's OWN encode time plus slack,
+                # instead of a fixed window independent of size -- see
+                # config.py's 'realistic-bigdata-routing' comment and
+                # TASK_DEADLINE_SLACK_FACTOR for why (lets a task's encoding
+                # finish with room to spare, so network/routing congestion --
+                # not the encoder -- becomes the binding constraint for
+                # whether it's delivered in time). No rng draw consumed here
+                # (pure function of n_images_k), so every scenario using
+                # TASK_DEADLINE_MODE='fixed' (every existing one) keeps its
+                # exact original rng call sequence -- n_images, then weight,
+                # then deadline -- bit-for-bit.
+                encode_s = n_images_k / C.ENC_IMGS_PER_S
+                deadline_offset = max(C.TASK_DEADLINE_MIN_S,
+                                      C.TASK_DEADLINE_SLACK_FACTOR * encode_s)
+                tasks.append(Task(
+                    kid=len(tasks), aoi=aoi['name'], src_sat=src,
+                    dst_gs=_nearest_gs(aoi), arrival_slot=t,
+                    n_images=n_images_k,
+                    weight=int(rng.choice(C.TASK_WEIGHTS)),
+                    deadline_s=int(t * C.SLOT_S + deadline_offset),
+                ))
+            else:
+                tasks.append(Task(
+                    kid=len(tasks), aoi=aoi['name'], src_sat=src,
+                    dst_gs=_nearest_gs(aoi), arrival_slot=t,
+                    n_images=n_images_k,
+                    weight=int(rng.choice(C.TASK_WEIGHTS)),
+                    deadline_s=int(t * C.SLOT_S
+                                   + rng.integers(C.TASK_DEADLINE_MIN_S,
+                                                  C.TASK_DEADLINE_MAX_S + 1)),
+                ))
             next_ok[a] = t + cooldown_slots
     return tasks
