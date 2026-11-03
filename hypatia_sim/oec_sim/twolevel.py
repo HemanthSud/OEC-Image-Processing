@@ -38,6 +38,7 @@ from scipy.sparse import csr_matrix
 
 from . import config as C
 from . import routing as R
+from . import utility
 from .schedulers import (MPCScheduler, _edge_keys_from_path, _cap_bits,
                         _tag_solve_log_rows)
 
@@ -104,11 +105,28 @@ class TwoLevelMPCScheduler(MPCScheduler):
         si = {v: len(fvars) + i for i, v in enumerate(shvars)}
         n = len(fvars) + len(shvars)
 
+        # Per-task shortfall weight: weight(k)/reward_norm(k), relative to
+        # the median over `active`, so a flat bit of shortfall doesn't cost
+        # the same for every task regardless of value. reward_norm(k) is the
+        # same deadline-achievable cap utility.accumulate()/y_coeff() divide
+        # by -- without this, the routing LP would spend scarce capacity
+        # protecting raw-bit demand from oversized tasks the depth MILP
+        # already discounts, the same size-inversion bug the reward-
+        # normalization fix targeted, just one layer up. Median-relative so
+        # the overall shortfall-vs-delay tradeoff (MPC2L_SHORTFALL_PENALTY's
+        # calibrated scale) is preserved for a typically-weighted task.
+        by_kid = {k.kid: k for k in active}
+        wf = {kid: utility.weight(k) / utility.reward_norm(k)
+              for kid, k in by_kid.items()}
+        median_wf = float(np.median(list(wf.values()))) if wf else 1.0
+        if median_wf <= 0.0:
+            median_wf = 1.0
+
         c = np.zeros(n)
         for (kid, tau, pi), i in fi.items():
             c[i] = cands[(kid, tau)][pi][2] / C.MPC2L_DELAY_REF_S
-        for v, i in si.items():
-            c[i] = C.MPC2L_SHORTFALL_PENALTY
+        for (kid, tau), i in si.items():
+            c[i] = C.MPC2L_SHORTFALL_PENALTY * wf[kid] / median_wf
 
         rows, cols, vals, lbs, ubs = [], [], [], [], []
         r = 0
@@ -207,13 +225,24 @@ class TwoLevelMPCScheduler(MPCScheduler):
 
         The honest demand is what the encoder can supply and the task still
         owes, capped per slot by the encoder pipeline.
+
+        `rem` is capped at utility.reward_norm(k) rather than raw k.n_images:
+        under TASK_SIZE_MODE='data_gb', reward_norm caps a task's achievable
+        ceiling at what it could actually encode by its own deadline, and
+        without this cap the routing LP below sees demand for bits the depth
+        MILP would never credit, pulling scarce capacity toward oversized
+        tasks in proportion to their raw size -- the same size-inversion
+        pathology the reward-normalization fix (utility.reward_norm) was
+        built to kill, just relocated one layer up into this routing demand.
+        No-op outside 'data_gb' mode: reward_norm(k) returns k.n_images
+        there, so `rem` is unchanged for every other scenario.
         """
         per_slot_imgs = C.ENC_IMGS_PER_S * C.SLOT_S
         d = {}
         for k in active:
             q = depths.get(k.kid, max(C.DEPTHS))
             bits_per_img = C.PAYLOAD_B[q] * 8
-            rem = max(k.n_images - k.delivered, 0.0)
+            rem = max(utility.reward_norm(k) - k.delivered, 0.0)
             for tau in range(H_r):
                 if rem <= 1e-9:
                     break

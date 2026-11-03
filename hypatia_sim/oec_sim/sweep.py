@@ -505,6 +505,132 @@ def run_realistic_datasize_scaled(scales=REALISTIC_DATASIZE_SCALE_FACTORS,
                                                   max_tasks, quick, workers)
 
 
+# ── Part 14: fabric-scarcity sensitivity under 'realistic-bigdata-routing' ──
+# Parts 12/13 run under 'realistic-bigdata', where Gbps-scale links make
+# transmission ~4 orders of magnitude faster than encoding -- no scheduler's
+# routing choices can ever show up in the result (see config.py's
+# 'realistic-bigdata-routing' comment). This scenario fixes that (scaled
+# per-task deadlines + Mbps-scale links), but had no sweep harness at all
+# until now. Reuses the calibration rate points already picked in config.py
+# (2026-10-20 greedy-fixed-16 probe) instead of re-deriving a grid: the
+# routing-strategy axis is already captured by scheduler identity
+# (Flat-MPC=static route_mode, OrbitFlow=predictive, schedulers.py's
+# route_mode), so what's actually new here is sweeping fabric scarcity to
+# see where/whether the three MPC schedulers diverge.
+REALISTIC_ROUTING_RATE_GRID_MBPS = [
+    (100, 200, 300),  # no contention (100% delivered) -- control point
+    (10, 20, 30),      # nominal: real contention, not degenerate (73.2%)
+    (5, 10, 15),       # 41.0% delivered
+    (2, 5, 8),         # 21.6% delivered
+    (1, 2, 4),         # too tight, same shape as fabric-limited's rejection
+]
+REALISTIC_ROUTING_SWEEP_SEEDS = [42]
+
+
+def _run_one_routing_combo(combo):
+    """Run exactly one (isl, gsl, gbs, seed, scheduler) point and return its
+    result row. Top-level/picklable, same shape as Part 13's
+    _run_one_combo, so ProcessPoolExecutor can farm the grid across workers
+    instead of running it serially in one process -- serial execution of
+    this scenario's first point alone ran 40+ minutes with zero output on a
+    quad-core laptop; this scenario's MAX_TASKS=500 under real fabric
+    congestion is expensive enough per run that every combo should get its
+    own core on a 64-thread box rather than queue behind the others."""
+    from .twolevel import TwoLevelMPCScheduler
+    isl, gsl, gbs, seed, name = combo
+    makers = {
+        'Flat-MPC': lambda tp, tk: MPCScheduler(tp, tk),
+        'OrbitFlow': lambda tp, tk: MPCScheduler(tp, tk, route_mode='predictive'),
+        'Two-Level-MPC': lambda tp, tk: TwoLevelMPCScheduler(tp, tk),
+        'greedy-fixed-16': lambda tp, tk: GreedyScheduler(tp, tk, depth=16),
+    }
+    with C.config_override(scenario='realistic-bigdata-routing'):
+        with C.config_override(ISL_RATE_BPS=isl * 1e6, GSL_RATE_BPS=gsl * 1e6,
+                               GS_RATE_BPS=gbs * 1e6, RNG_SEED=seed):
+            topo = T.build_topology()
+            tk = TK.generate_tasks(topo)
+            tot_img = sum(k.n_images for k in tk)
+            sched = makers[name](topo, tk)
+            t0 = time.time()
+            hist = sched.run()
+            wall_s = time.time() - t0
+    row = _row(gbs, seed, name, tk, hist, tot_img, wall_s, obj=sched,
+              rate_key='gbs_mbps')
+    row['isl_mbps'] = isl
+    row['gsl_mbps'] = gsl
+    return row
+
+
+def _realistic_bigdata_routing_sensitivity(rate_grid_mbps, seeds, quick,
+                                           workers=16):
+    if quick:
+        rate_grid_mbps, seeds = rate_grid_mbps[:2], seeds[:1]
+    os.makedirs(OUT_DIR, exist_ok=True)
+    out_name = f'results_realistic_bigdata_routing{"_quick" if quick else ""}.csv'
+    path = os.path.join(OUT_DIR, out_name)
+
+    # Resume support, same pattern as Part 13: rows already in `path` are
+    # skipped on relaunch, so an interruption only costs the combos still
+    # in flight.
+    rows = []
+    done = set()
+    if os.path.exists(path):
+        with open(path, newline='') as f:
+            for r in csv.DictReader(f):
+                rows.append(r)
+                done.add((r['isl_mbps'], r['gsl_mbps'], r['gbs_mbps'],
+                         r['seed'], r['scheduler']))
+        if rows:
+            print(f'resuming {out_name}: {len(rows)} rows already done, '
+                 'skipping those', flush=True)
+
+    combos = []
+    for isl, gsl, gbs in rate_grid_mbps:
+        for seed in seeds:
+            for name in ('Flat-MPC', 'OrbitFlow', 'Two-Level-MPC',
+                        'greedy-fixed-16'):
+                key = (str(isl), str(gsl), str(gbs), str(seed), name)
+                if key in done:
+                    continue
+                combos.append((isl, gsl, gbs, seed, name))
+
+    if not combos:
+        print(f'nothing to do, {out_name} already has every combo', flush=True)
+        return rows
+
+    workers = min(workers, len(combos))
+    print(f'running {len(combos)} combos across {workers} worker processes',
+         flush=True)
+    import concurrent.futures as cf
+    with cf.ProcessPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_run_one_routing_combo, c): c for c in combos}
+        for fut in cf.as_completed(futures):
+            isl, gsl, gbs, seed, name = futures[fut]
+            row = fut.result()
+            rows.append(row)
+            print(f'  isl/gsl/gbs={isl}/{gsl}/{gbs}Mbps seed={seed:3d} '
+                 f'{name:14s} util={row["utility"]:9.2f} '
+                 f'delivery={row["delivery_frac"]:.3f} '
+                 f'viol={row["violation_frac"]:.3f} ({row["wall_s"]:7.1f}s)',
+                 flush=True)
+            with open(path, 'w', newline='') as f:
+                w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+                w.writeheader(); w.writerows(rows)
+    print(f'wrote {len(rows)} rows -> {os.path.relpath(path)}')
+    return rows
+
+
+def run_realistic_bigdata_routing(rate_grid_mbps=REALISTIC_ROUTING_RATE_GRID_MBPS,
+                                  seeds=REALISTIC_ROUTING_SWEEP_SEEDS,
+                                  quick=False, workers=16):
+    """Vary ISL/GSL/GBS together under 'realistic-bigdata-routing' to test
+    for routing-strategy separation now that fabric scarcity is the binding
+    constraint instead of encoder throughput. Combos run in parallel across
+    `workers` processes -- see _realistic_bigdata_routing_sensitivity."""
+    return _realistic_bigdata_routing_sensitivity(rate_grid_mbps, seeds,
+                                                   quick, workers)
+
+
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser()
@@ -526,9 +652,13 @@ if __name__ == '__main__':
                     help="Part 13: vary per-task data volume AND ISL/GSL/GBS "
                          "rates together, 1x/2x/5x, to test whether the KNOWN "
                          "ISSUE collapse is scale-dependent")
+    ap.add_argument('--realistic-bigdata-routing', action='store_true',
+                    help="Part 14: vary ISL/GSL/GBS together under "
+                         "'realistic-bigdata-routing' to test for routing-"
+                         "strategy separation under real fabric scarcity")
     ap.add_argument('--workers', type=int, default=16,
-                    help="Part 13 only: number of worker processes to run "
-                         "grid combos in parallel across (default 16)")
+                    help="Parts 13/14 only: number of worker processes to "
+                         "run grid combos in parallel across (default 16)")
     ap.add_argument('--utility', default=C.UTIL_MODE,
                     choices=('legacy', 'unified'))
     args = ap.parse_args()
@@ -543,6 +673,8 @@ if __name__ == '__main__':
         run_realistic_datasize(quick=args.quick)
     elif args.realistic_datasize_scaled:
         run_realistic_datasize_scaled(quick=args.quick, workers=args.workers)
+    elif args.realistic_bigdata_routing:
+        run_realistic_bigdata_routing(quick=args.quick, workers=args.workers)
     elif args.couplings:
         run_couplings(quick=args.quick)
     else:
