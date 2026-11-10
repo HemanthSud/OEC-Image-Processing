@@ -241,11 +241,15 @@ class MPCScheduler(_Base):
                                   # MPC's static routing has nothing to report
         self.last_solve = -10**9
         self.known = set()
+        self.pending_new = set()
 
     def decide(self, t, active):
-        new = {k.kid for k in active} - self.known
-        if new or t - self.last_solve >= C.MPC_RESOLVE_EVERY:
-            self.known |= new
+        new = {k.kid for k in active} - self.known - self.pending_new
+        self.pending_new |= new
+        if (len(self.pending_new) >= C.MPC_RESOLVE_GROUP_SIZE
+                or t - self.last_solve >= C.MPC_RESOLVE_EVERY):
+            self.known |= self.pending_new
+            self.pending_new = set()
             self._solve(t, active)
             self.last_solve = t
         self._execute(t, active)
@@ -297,7 +301,8 @@ class MPCScheduler(_Base):
                 t_s=t * C.SLOT_S, iter=it, n_active=len(active),
                 n_vars=sol['n_vars'], n_rows=sol['n_rows'],
                 status=sol['status'], objective=sol['objective'],
-                wall_s=sol['wall_s']))
+                wall_s=sol['wall_s'], build_s=sol['build_s'],
+                solve_s=sol['solve_s']))
             if sol['status'] == 'optimal' and (
                     best is None or sol['objective'] > best['objective']):
                 best, best_rs, best_paths = sol, rs, paths
@@ -428,8 +433,10 @@ class MPCScheduler(_Base):
                 for q in qs:
                     yvars.append((k.kid, q, tau))
         if not yvars:
+            wall_s = time.perf_counter() - t0
             return dict(plan={}, objective=0.0, status='infeasible',
-                       n_vars=0, n_rows=0, wall_s=time.perf_counter() - t0)
+                       n_vars=0, n_rows=0, wall_s=wall_s,
+                       build_s=wall_s, solve_s=0.0)
 
         xvars = [(k.kid, q) for k in active if k.depth is None
                  for q in C.DEPTHS]
@@ -580,11 +587,14 @@ class MPCScheduler(_Base):
             # the quality gain, and a floor pinned at 0 would then make the
             # row u_min <= Uhat_k infeasible.
             lb_var[umin_i] = -np.inf
+        t_build = time.perf_counter()
         res = milp(c=c,
                    constraints=LinearConstraint(A, np.array(lbs), np.array(ubs)),
                    integrality=integrality,
                    bounds=Bounds(lb_var, ub_var))
         wall_s = time.perf_counter() - t0
+        build_s = t_build - t0
+        solve_s = wall_s - build_s
         plan = {}
         status = 'optimal' if res.x is not None else 'infeasible'
         obj = -float(res.fun) if res.x is not None else -np.inf
@@ -593,7 +603,8 @@ class MPCScheduler(_Base):
                 if res.x[i] > 1e-6:
                     plan[(kid, q, t + tau)] = float(res.x[i])
         return dict(plan=plan, objective=obj, status=status,
-                   n_vars=n, n_rows=r, wall_s=wall_s)
+                   n_vars=n, n_rows=r, wall_s=wall_s,
+                   build_s=build_s, solve_s=solve_s)
 
     # -- execute first-slot decisions, re-checking real capacity ---------------
     def _execute(self, t, active):

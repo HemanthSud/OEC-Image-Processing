@@ -442,6 +442,10 @@ TASK_SIZE_REF_DEPTH = max(DEPTHS)
 # already ran above (module-load time), so a bare assignment here would
 # silently clobber it back to a fixed value for every scenario.
 MPC_RESOLVE_EVERY = 5      # re-solve at least every 5 slots (and on arrivals)
+MPC_RESOLVE_GROUP_SIZE = 1  # 1 = resolve on every arrival (current behavior).
+                             # >1 batches that many new-task arrivals into one
+                             # resolve, bounded by MPC_RESOLVE_EVERY so a lone
+                             # arrival still gets picked up within that many slots.
 
 # Task-2 feasibility check: distinct from MPC_REPLAN_TIME_BUDGET_S above,
 # which only bounds the inner route-refinement loop. These are compared

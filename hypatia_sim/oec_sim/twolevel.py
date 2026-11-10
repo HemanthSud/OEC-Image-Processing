@@ -156,17 +156,20 @@ class TwoLevelMPCScheduler(MPCScheduler):
             add([(i, 1.0) for i in idxs], -np.inf, _cap_bits(key))
 
         A = csr_matrix((vals, (rows, cols)), shape=(r, n))
+        t_build = time.perf_counter()
         res = milp(c=c, constraints=LinearConstraint(A, np.array(lbs),
                                                      np.array(ubs)),
                    integrality=np.zeros(n),
                    bounds=Bounds(np.zeros(n), np.full(n, np.inf)))
         wall = time.perf_counter() - t0
+        build_s = t_build - t0
+        solve_s = wall - build_s
         self.solve_log.append(dict(
             t_s=t * C.SLOT_S, level='route', n_active=len(active),
             n_vars=n, n_rows=r,
             status='optimal' if res.x is not None else 'infeasible',
             objective=float(res.fun) if res.x is not None else float('nan'),
-            wall_s=wall))
+            wall_s=wall, build_s=build_s, solve_s=solve_s))
         if res.x is None:
             return None
 
@@ -354,7 +357,8 @@ class TwoLevelMPCScheduler(MPCScheduler):
         self.solve_log.append(dict(
             t_s=t * C.SLOT_S, level='depth', iter=it, n_active=len(active),
             n_vars=sol['n_vars'], n_rows=sol['n_rows'], status=sol['status'],
-            objective=sol['objective'], wall_s=sol['wall_s']))
+            objective=sol['objective'], wall_s=sol['wall_s'],
+            build_s=sol['build_s'], solve_s=sol['solve_s']))
 
     def _record_routes(self, t, mix):
         for (kid, tau), split in mix.split.items():
